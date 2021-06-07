@@ -1,8 +1,8 @@
 ##########################################################
-#	Wrapper to batch process MANGO warped images 
+#	Wrapper to batch process MANGO warped images
 #	and create unwarped images
 #	This program needs to be in the same directory
-#	as a successfully running MANGOImage.py 
+#	as a successfully running MANGOImage.py
 #	Asti Bhatt Dec 5, 2014
 ##########################################################
 
@@ -11,7 +11,7 @@ import os
 from StringIO import StringIO
 from numpy import *
 from PIL import Image
-import numpy 
+import numpy
 import datetime
 from datetime import timedelta
 import time
@@ -30,10 +30,10 @@ siteInfofname = "SiteInformation.csv"
 f = open(siteInfofname,'r')
 siteText = f.read()
 s = StringIO(siteText)
-siteData = numpy.genfromtxt(s, dtype="|S", delimiter = ',', autostrip=True)   
-        
+siteData = numpy.genfromtxt(s, dtype="|S", delimiter = ',', autostrip=True)
+
 rows = siteData[:,0]
-        
+
 PixArray = []
 for i in range(1,len(rows)):
     SiteInfo = siteData[i,:]
@@ -45,7 +45,7 @@ rawdirprefix= "/home/ftp/pub/earthcube/provider/asti/MANGO/"
 siteDir = "Iowa"
 #rawdirprefix = "/home/abhatt/workspace/WPI-SRI MQP - MANGO SYSTEM1/MANGO2/"
 
-# directory where processed data will be 
+# directory where processed data will be
 #processeddirprefix = "/media/abhatt/Seagate Backup Plus Drive/workspace/Data/MANGO/InGeO/"
 processeddirprefix = "/home/ftp/pub/earthcube/provider/asti/MANGOProcessed/"
 #processeddirprefix = rawdirprefix + siteDir + "/"
@@ -57,22 +57,22 @@ for rawFolder in next(os.walk(rawdirprefix + siteDir))[1]:
 	rawPath = rawdirprefix + siteDir + "/" + rawFolder + "/"
 	rawList = glob.glob1(rawPath, siteDir[0]+ '*.*')
 	rawList.sort()
-	print("Processing raw folder: " + rawFolder) 
+	print("Processing raw folder: " + rawFolder)
 
 # get Site name based on folder being processed
 	if rawFolder[0][0] == 'H':
 		siteName = 'Hat Creek Observatory'
 	else:
-		 if siteDir[0] == 'C':
+		if siteDir[0] == 'C':
 			siteName = 'Capitol Reef Field Station'
-		 else:
+		else:
 			if siteDir[0] == 'I':
 				siteName = 'Eastern Iowa Observatory'
 			else:
 				if siteDir[0] == 'B':
 					siteName = 'Bridger'
 
-# make directory based on folder being processed in the appropriate location 
+# make directory based on folder being processed in the appropriate location
     	pfoldersdir = processeddirprefix + siteDir + "/" + rawFolder
 	diff = len(rawList)
 	if os.path.isdir(pfoldersdir):
@@ -84,26 +84,26 @@ for rawFolder in next(os.walk(rawdirprefix + siteDir))[1]:
 #	print rawList[0]
 # process individual images
 	for rawImage in rawList[len(rawList)-diff:len(rawList)]:
-	        #print rawImage		
+	        #print rawImage
         	MANGOimage(siteName, siteDir, rawFolder, rawPath, rawImage, PixArray)
-    
+
     #Make a keogram from the images just made
     	kfoldersdir = keogramdirprefix + siteDir + "/" + rawFolder
 	if not os.path.isdir(kfoldersdir):
 		os.makedirs(kfoldersdir)
-    
+
 		pimagelist = glob.glob1(pfoldersdir, siteDir[0]+'*.*')
 		pimagelist.sort()
 		# extract time from the filenames in the folder
-		x = [time.strptime(rawFolder[-7:len(rawFolder)] + name[1:7], "%b%d%y%H%M%S") for name in pimagelist]  
+		x = [time.strptime(rawFolder[-7:len(rawFolder)] + name[1:7], "%b%d%y%H%M%S") for name in pimagelist]
 		dt = [datetime.datetime.fromtimestamp(mktime(y)) for y in x]
 		# create a 24-hour datetime array
 		t1 = (datetime.datetime.fromtimestamp(mktime(time.strptime(rawFolder[-7:len(rawFolder)]+"000000","%b%d%y%H%M%S"))))
-		#t2 = date2num(t1 + timedelta(days=1))	
+		#t2 = date2num(t1 + timedelta(days=1))
 		t2 = (datetime.datetime.fromtimestamp(mktime(time.strptime(rawFolder[-7:len(rawFolder)]+"235959","%b%d%y%H%M%S"))))
 		d1 = dates.date2num(t1)
 		d2 = dates.date2num(t2)
-		# find the begin and end points for the actual data to fit in the 24-hour keogram 
+		# find the begin and end points for the actual data to fit in the 24-hour keogram
 		cad = dt[1]-dt[0]
 		totalk = (t2-t1).total_seconds()/cad.total_seconds()
 		begink = (dt[0]-t1).total_seconds()/cad.total_seconds()
@@ -118,7 +118,7 @@ for rawFolder in next(os.walk(rawdirprefix + siteDir))[1]:
 	        	keo[k,:] = arr1[:,250,0]
         		k=k+1
         	# add the data to the empty array created above at right indices
-		keoall[int(begink):int(begink)+len(pimagelist)] = keo   
+		keoall[int(begink):int(begink)+len(pimagelist)] = keo
     		# plot the keogram
     		fig = pylab.figure(num=None, figsize=(35, 2), dpi=100, facecolor='w', edgecolor='w')
 		fig, ax = pylab.subplots()
@@ -127,12 +127,12 @@ for rawFolder in next(os.walk(rawdirprefix + siteDir))[1]:
 		ax.tick_params(axis='y', which='both', left='off', right='off', labelleft='off')
 		date_formatter = dates.DateFormatter('%H%M')
 		ax.xaxis.set_major_formatter(date_formatter)
-		fig.savefig(kfoldersdir+"/"+rawFolder[-7:len(rawFolder)]+'_keogram.png',bbox_inches='tight',facecolor=fig.get_facecolor(), edgecolor='none') 
+		fig.savefig(kfoldersdir+"/"+rawFolder[-7:len(rawFolder)]+'_keogram.png',bbox_inches='tight',facecolor=fig.get_facecolor(), edgecolor='none')
 		print "Keogram saved"
-    		
-    		
+
+
     #create stacked images for every hour
-    		
+
 		# extract hours from the datetime object created above
 	    	hrs = [(dt[k].hour) for k in range(len(dt))]
 		# get counts for number of images in that hour
@@ -148,16 +148,12 @@ for rawFolder in next(os.walk(rawdirprefix + siteDir))[1]:
 	        	    fig = fig1.add_subplot(1,counts[l],k+1)
         		    fig.imshow(img2)
 			# Turn off ticks from x and y axis
-        		    fig.tick_params(axis='x', which='both', bottom='off', top='off', colors = 'white', labelbottom='off') 
-	        	    fig.tick_params(axis='y', which='both', left='off', right='off', labelleft='off') 
+        		    fig.tick_params(axis='x', which='both', bottom='off', top='off', colors = 'white', labelbottom='off')
+	        	    fig.tick_params(axis='y', which='both', left='off', right='off', labelleft='off')
 			# Turn off frame
-		            fig.set_frame_on(False) 
+		            fig.set_frame_on(False)
         		    fig.set_xlabel(pimagelist[imc][1:5], color='w')
 	        	    imc = imc+1
         		    fig1.savefig(kfoldersdir+"/"+rawFolder[-7:len(rawFolder)]+'_hour'+str(b[l])+'.png',bbox_inches='tight',facecolor=fig1.get_facecolor(), edgecolor='none')
-        	print "Stack images created"	
+        	print "Stack images created"
 	pylab.clf() #clear all the plots made
-    		
-    
-           
-
