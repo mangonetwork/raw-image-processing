@@ -31,7 +31,7 @@ rawFolder = ""
 rawPath = "C:/Users/padma/MANGO SU21/May 8 2016 data/"
 
 #list of raw images
-rawList = glob.glob1(rawPath, '*.png')
+rawList = glob.glob1(rawPath, '*.129')
 #OR rawList= [file for file in os.listdir(rawPath) if file.endswith('.png')]
 
 # make directory based on folder being processed in the appropriate location
@@ -44,8 +44,4 @@ if not os.path.isdir(pfoldersdir):
     
 # process individual images
 for rawImage in rawList:
-    MANGOimage.MANGOimage(siteName, siteDir, rawFolder, rawPath, rawImage, PixArray,
-                          pfoldersdir)
-    proc_File_name = 'processed_' + rawImage
-    file_n = os.path.join(pfoldersdir, proc_File_name)
-    f = open(file_n, 'a')
+    MANGOimage.MANGOimage(siteName, siteDir, rawFolder, rawPath, rawImage, PixArray, pfoldersdir)

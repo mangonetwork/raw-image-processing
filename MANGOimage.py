@@ -73,15 +73,15 @@ class MANGOimage:
             #self.siteName           = hdulist[0].header['SITE']
             #self.calibrationFlag    = 0
             #self.writeMode          = 'L'
-    
-    	# for BU sw generated binary data files. 	
-    	f = open(self.rawImageAddress, "rb")
-    	a = np.fromfile(self.rawImageAddress, dtype='int16')
-    	self.width = 695
-    	self.height = 519
-    	self.imageData = a[64:360769].reshape([519, 695]).astype('int32')
+        # for BU sw generated binary data files. 	
+        f = open(self.rawImageAddress, "rb")
+        a = np.fromfile(f, dtype='int16')
+        print(a.shape)
+        self.width = 695
+        self.height = 519
+        self.imageData = a[64:360769].reshape([519, 695]).astype('int32')
     	
-    #	print self.imageData.shape
+    #	print self.imageData.shape 
     #	figure1 = self.imageData
     #	plt.imshow(figure1)
     #	plt.title('Raw Image')
@@ -95,7 +95,8 @@ class MANGOimage:
                 #print self.siteName
 
     def loadCalibrationData(self):
-        calibrationFilename     = DIRN + self.siteName + "/calibration/" + 'Calibration.csv' # uncomment for windows
+        #calibrationFilename     = DIRN + self.siteName + "/calibration/" + 'Calibration.csv' # uncomment for windows
+        calibrationFilename = "C:/Users/padma/MANGO SU21/raw-image-processing/Calibration.csv"
 #	calibrationFilename     = os.path.dirname(os.getcwd()) + "/Sites/" + self.siteName + "/calibration/" + 'Calibration.csv' # uncomment for linux
 
         ## This is concatenated into the SiteInfo in getSiteInformation
@@ -289,29 +290,30 @@ class MANGOimage:
     def writePNG(self):
         #Writing for web display - change output directory to something local
         #writeAddress = DIRN + "All Sites Images\\" + self.siteName + ".png" # uncomment for windows
-        print("Saving image: " + self.rawImage[0:8])
+        print("Saving image: " + self.rawImage[0:6])
         #processeddirprefix = "/media/abhatt/Seagate Backup Plus Drive/workspace/Data/MANGO/InGeO/"
         #processeddirprefix = "/home/ftp/pub/earthcube/provider/asti/MANGOProcessed/"
-        processeddirprefix = "C:/Users/padma/MANGO SU21/May 8 2016 data/Processed data/"
         #writeAddress = self.rawPath + "Processed/" + self.rawImage[0:8] + ".png"
         #writeAddress = processeddirprefix + self.siteDir + "/" + self.rawFolder + "/"+ self.rawImage[0:8] + ".png"
-        writeAddress = self.pfoldersdir + "/" + self.rawImage[0:8] + ".png" 
+        writeAddress = self.pfoldersdir + "/" + self.rawImage[0:6] + ".png" 
         #change write addres
         #writeAddress = os.path.dirname(os.getcwd()) + "/Sites/All Sites Images/" + self.siteName + ".png" # uncomment for linux
         #writeAddress = self.rawImageAddress[-12:-4] + ".png"
         #writeAddress = self.rawImageAddress[0:-13] + "/Processed1/" + self.rawImageAddress[-12:-4] + ".png"
         finalImage = PIL.Image.fromarray(self.imageData, self.writeMode)
-        implt =	plt.imshow(finalImage, clim=(0,200))
+        #implt =	plt.imshow(finalImage, clim=(0,200))
         #plt.imshow(finalImage)
-        plt.axis('off')
+        #plt.axis('off')
         #implt.set_clim(self.minIndex, self.maxIndex)
         #implt.set_clim(0, 250)
         #plt.savefig(writeAddress, transparent=True, frameon=False, bbox_inches='tight', pad_inches=0)
-        finalImage.save(writeAddress)
-        plt.clf() 
+        finalImage.save(writeAddress, format = 'png')
+        #plt.clf() 
         #Writing for archiving to source folder
         #writeAddress = self.rawImageAddress[:-3] + "png"
         #finalImage.save(writeAddress)
         #plt.imshow(finalImage)
         #plt.title('Final Image')
         #plt.show()
+        #file_n = os.path.join(pfoldersdir, proc_File_name)
+        #f = open(file_n, 'a')
