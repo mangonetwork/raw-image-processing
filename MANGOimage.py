@@ -42,8 +42,9 @@ import glob
 import sys
 import logging
 import matplotlib.pyplot as plt
+import skimage.transform
 
-DIRN = "/mnt/disk1/home/abhatt/venv/SERVER/myproject/MANGO/app/static/Sites/"
+DIRN = "C:/Users/padma/MANGO SU21/"
 #DIRN = "~/venv/SERVER/myproject/MANGO/app/static/Sites/"
 #DIRN = '/home/abhatt/workspace/WPI-SRI MQP - MANGO SYSTEM1/SERVER/myproject/MANGO/app/static/Sites/'
 #DIRN = "C:\\Users\\WPI\\Documents\\WPI-SRI MQP - MANGO SYSTEM1\\SERVER\\myproject\\MANGO\\app\\static\\Sites\\"
@@ -76,7 +77,7 @@ class MANGOimage:
         # for BU sw generated binary data files. 	
         f = open(self.rawImageAddress, "rb")
         a = np.fromfile(f, dtype='int16')
-        print(a.shape)
+        #print(a.shape)
         self.width = 695
         self.height = 519
         self.imageData = a[64:360769].reshape([519, 695]).astype('int32')
@@ -92,11 +93,10 @@ class MANGOimage:
         for site in self.PixArray:
             if site[1] == self.rawImageAddress[0]:
                 self.siteName = site[0]
-                #print self.siteName
+                
 
     def loadCalibrationData(self):
-        #calibrationFilename     = DIRN + self.siteName + "/calibration/" + 'Calibration.csv' # uncomment for windows
-        calibrationFilename = "C:/Users/padma/MANGO SU21/raw-image-processing/Calibration.csv"
+        calibrationFilename     = DIRN + self.siteName + "/calibration/" + 'Calibration.csv' # uncomment for windows
 #	calibrationFilename     = os.path.dirname(os.getcwd()) + "/Sites/" + self.siteName + "/calibration/" + 'Calibration.csv' # uncomment for linux
 
         ## This is concatenated into the SiteInfo in getSiteInformation
@@ -128,7 +128,7 @@ class MANGOimage:
 #	print "background correction done"
 
     def process(self):
-        self.getSiteName()
+        #self.getSiteName()
         self.loadCalibrationData()
         self.loadNewIJ()
         self.loadBackgroundCorrection()
@@ -195,16 +195,16 @@ class MANGOimage:
         rotationAngle_1 = np.degrees(atan(-self.b1/self.a1))
         rotationAngle_2 = np.degrees(atan(self.a2/self.b2))
         self.rotationAngle = .5*(rotationAngle_1 + rotationAngle_2)
-#	if self.siteName == 'Eastern Iowa Observatory':
-#		self.rotationAngle = .5*(rotationAngle_1 + rotationAngle_2)+180
-#	print self.rotationAngle
-        self.imageData = np.fliplr(misc.imrotate(self.imageData, self.rotationAngle, interp = 'bicubic'))
+        #if self.siteName == 'Eastern Iowa Observatory':
+            #self.rotationAngle = .5*(rotationAngle_1 + rotationAngle_2)+180
+            #print self.rotationAngle
+        self.imageData = np.fliplr(skimage.transform.rotate(self.imageData, self.rotationAngle, order = 3))
         self.imageData = self.imageData.astype(float)
-#        figure3 = self.imageData
-#        plt.imshow(figure3)
-#        plt.title('Calibrated Image')
-#        plt.gray()
-#        plt.show()
+        #figure3 = self.imageData
+        #plt.imshow(figure3)
+        #plt.title('Calibrated Image')
+        #plt.gray()
+        #plt.show()
         
         #Rotating Zenith Counter-clockwise by rotation angle and flipping it left-right
         zenithI = self.width - int(cos(radians(self.rotationAngle))*(self.zenith[0] - self.width/2) - sin(radians(self.rotationAngle))*(self.zenith[1]-self.height/2) + self.width/2)
@@ -266,7 +266,7 @@ class MANGOimage:
         #Histogram Equalization to adjust contrast [1%-99%]
         numberBins = 10000 #A good balance between time and space complexity, and well as precision
         flattenedImageData = self.imageData.flatten()
-        imageHistogram, bins = np.histogram(flattenedImageData, numberBins, normed = True)
+        imageHistogram, bins = np.histogram(flattenedImageData, numberBins)
         imageHistogram = imageHistogram[1:len(imageHistogram)]
         bins = bins[1:len(bins)]
         cdf = np.cumsum(imageHistogram)
@@ -290,7 +290,7 @@ class MANGOimage:
     def writePNG(self):
         #Writing for web display - change output directory to something local
         #writeAddress = DIRN + "All Sites Images\\" + self.siteName + ".png" # uncomment for windows
-        print("Saving image: " + self.rawImage[0:6])
+        #print("Saving image: " + self.rawImage[0:8])
         #processeddirprefix = "/media/abhatt/Seagate Backup Plus Drive/workspace/Data/MANGO/InGeO/"
         #processeddirprefix = "/home/ftp/pub/earthcube/provider/asti/MANGOProcessed/"
         #writeAddress = self.rawPath + "Processed/" + self.rawImage[0:8] + ".png"
