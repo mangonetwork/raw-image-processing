@@ -43,6 +43,7 @@ import sys
 import logging
 import matplotlib.pyplot as plt
 import skimage.transform
+import pandas as pd
 
 DIRN = "C:/Users/padma/MANGO SU21/"
 #DIRN = "~/venv/SERVER/myproject/MANGO/app/static/Sites/"
@@ -117,15 +118,22 @@ class MANGOimage:
         newJFilename            = DIRN + self.siteName + "/calibration/" + 'newJ.csv' # uncomment for windows
 #	newIFilename            = os.path.dirname(os.getcwd()) + "/Sites/" + self.siteName + "/calibration/" + 'newI.csv' # uncomment for linux
 #        newJFilename           = os.path.dirname(os.getcwd()) + "/Sites/" + self.siteName + "/calibration/" + 'newJ.csv' # uncomment for linux
-        self.newIMatrix         = genfromtxt(newIFilename, delimiter=',')
-        self.newJMatrix         = genfromtxt(newJFilename, delimiter=',')
-#	print self.newIMatrix.shape, self.newJMatrix.shape
+        nif_df = pd.read_csv(newIFilename, delimiter = ',', header = None)
+        self.newIMatrix = np.array(nif_df)
+        
+        njf_df = pd.read_csv(newJFilename, delimiter = ',', header = None)
+        self.newJMatrix = np.array(njf_df)
+        
+        #old code:
+        #self.newIMatrix = genfromtxt(newIFilename, delimiter = ',')
+        #self.newJMatrix = genfromtxt(newJFilename, delimiter = ',')
 
     def loadBackgroundCorrection(self):
         backgroundCorrectionFilename = DIRN + self.siteName + "/calibration/" + 'backgroundCorrection.csv' # uncomment for windows
-#	backgroundCorrectionFilename    = os.path.dirname(os.getcwd()) + "/Sites/" + self.siteName + "/calibration/" + 'backgroundCorrection.csv' # uncomment for linux
-        self.backgroundCorrection = genfromtxt(backgroundCorrectionFilename, delimiter=',')
-#	print "background correction done"
+        bg_corr_df = pd.read_csv(backgroundCorrectionFilename, delimiter = ',', header = None)
+        #backgroundCorrectionFilename    = os.path.dirname(os.getcwd()) + "/Sites/" + self.siteName + "/calibration/" + 'backgroundCorrection.csv' # uncomment for linux
+        self.backgroundCorrection = np.array(bg_corr_df)
+        #self.backgroundCorrection = genfromtxt(backgroundCorrectionFilename, delimiter = ',')
 
     def process(self):
         #self.getSiteName()
@@ -198,8 +206,7 @@ class MANGOimage:
         #if self.siteName == 'Eastern Iowa Observatory':
             #self.rotationAngle = .5*(rotationAngle_1 + rotationAngle_2)+180
             #print self.rotationAngle
-        self.imageData = np.fliplr(skimage.transform.rotate(self.imageData, self.rotationAngle, order = 3))
-        self.imageData = self.imageData.astype(float)
+        self.imageData = np.fliplr(skimage.transform.rotate(self.imageData, self.rotationAngle, order = 3)).astype(float)
         #figure3 = self.imageData
         #plt.imshow(figure3)
         #plt.title('Calibrated Image')
@@ -267,13 +274,18 @@ class MANGOimage:
         numberBins = 10000 #A good balance between time and space complexity, and well as precision
         flattenedImageData = self.imageData.flatten()
         imageHistogram, bins = np.histogram(flattenedImageData, numberBins)
-        imageHistogram = imageHistogram[1:len(imageHistogram)]
-        bins = bins[1:len(bins)]
+        imageHistogram = imageHistogram[1:]
+        bins = bins[1:]
         cdf = np.cumsum(imageHistogram)
         cdf = cdf[0:9996]
-
-        maxIndex = min(range(len(cdf)), key=lambda i: abs(cdf[i]-0.95*max(cdf)))
-        minIndex = min(range(len(cdf)), key=lambda i: abs(cdf[i]-0.05*max(cdf)))
+        max_cdf = max(cdf)
+        maxIndex = np.argmin(abs(cdf - 0.95*max_cdf))
+        minIndex = np.argmin(abs(cdf - 0.05*max_cdf))
+        #the following two lines took forever
+        #maxIndex = min(range(len(cdf)), key=lambda i: abs(cdf[i]-0.95*max_cdf))
+        #minIndex = min(range(len(cdf)), key=lambda i: abs(cdf[i]-0.05*max_cdf))
+        
+        #print(maxIndex1, minIndex1, maxIndex, minIndex)
     #	maxI = where(cdf <= 0.99*max(cdf))
     #	self.maxIndex = maxI[-1]
     #	minI = where(cdf <= 0.01*max(cdf))
@@ -283,8 +295,10 @@ class MANGOimage:
         lowValueIndices = flattenedImageData < vmin
         flattenedImageData[lowValueIndices] = vmin
         highValueIndices = flattenedImageData > vmax
+
         flattenedImageData[highValueIndices] = vmax
         self.imageData = flattenedImageData.reshape(self.imageData.shape)
+        #print(self.imageData.shape)
         return self.imageData
 
     def writePNG(self):
@@ -295,7 +309,7 @@ class MANGOimage:
         #processeddirprefix = "/home/ftp/pub/earthcube/provider/asti/MANGOProcessed/"
         #writeAddress = self.rawPath + "Processed/" + self.rawImage[0:8] + ".png"
         #writeAddress = processeddirprefix + self.siteDir + "/" + self.rawFolder + "/"+ self.rawImage[0:8] + ".png"
-        writeAddress = self.pfoldersdir + "/" + self.rawImage[0:6] + ".png" 
+        writeAddress = self.pfoldersdir + "/" + self.rawImage[0:8] + ".png" 
         #change write addres
         #writeAddress = os.path.dirname(os.getcwd()) + "/Sites/All Sites Images/" + self.siteName + ".png" # uncomment for linux
         #writeAddress = self.rawImageAddress[-12:-4] + ".png"
@@ -315,5 +329,4 @@ class MANGOimage:
         #plt.imshow(finalImage)
         #plt.title('Final Image')
         #plt.show()
-        #file_n = os.path.join(pfoldersdir, proc_File_name)
-        #f = open(file_n, 'a')
+        

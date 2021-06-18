@@ -2,12 +2,14 @@
 
 
 import MANGOimage
+import create_hdf5_files
 from pathlib import Path
 import glob
 import io
 import numpy
 import os
 import warnings
+import configparser
 warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 # Read the site information file to get 'PixArray'
 siteInfofname = "SiteInformation.csv"
@@ -26,9 +28,9 @@ for i in range(1,len(rows)):
 siteName = "Capitol Reef Field Station"
 siteDir = "May 8 2016 data"
 rawFolder = ""
-
+parentFolder = "C:/Users/padma/MANGO SU21/"
 #directory where unprocessed data are
-rawPath = "C:/Users/padma/MANGO SU21/May 8 2016 data/"
+rawPath = parentFolder + siteDir + "/" + rawFolder
 
 #list of raw images
 rawList = glob.glob1(rawPath, '*.129')
@@ -42,6 +44,11 @@ pfoldersdir = rawPath + processedFolder
 if not os.path.isdir(pfoldersdir):
     os.makedirs(pfoldersdir)
     
+    
 # process individual images
 for rawImage in rawList:
-    MANGOimage.MANGOimage(siteName, siteDir, rawFolder, rawPath, rawImage, PixArray, pfoldersdir)
+    writeAddress = pfoldersdir + "/" + rawImage[0:8] + ".png"
+    if not os.path.exists(writeAddress):
+        MANGOimage.MANGOimage(siteName, siteDir, rawFolder, rawPath, rawImage, PixArray, pfoldersdir)
+
+create_hdf5_files.hdf5_file_info('SiteInformation.csv', pfoldersdir, parentFolder)
