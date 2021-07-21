@@ -18,9 +18,8 @@
 #   2013-02-22  Fabrice Kengne
 #               Adding compatibility for FITS read
 #
-#   2014-10-25  Asti Bhatt
-#		Adding compatibility for BU software generated .153 files
-#		
+# 2014-10-25  Asti Bhatt
+# Adding compatibility for BU software generated .153 files
 #######################################################################
 
 
@@ -33,6 +32,8 @@ import copy
 import skimage.transform
 import pandas as pd
 from skimage import exposure
+import scipy.linalg as slg
+
 
 
 class MANGOimage:
@@ -50,10 +51,8 @@ class MANGOimage:
             self.loadFITS()
         except ValueError:
             return
-        self.process()
 
     def loadFITS(self):
-        # cannot open .129 file using skimage
 
         f = open(self.rawImageAddress, "rb")
         a = np.fromfile(f, dtype='int16')
@@ -62,14 +61,16 @@ class MANGOimage:
         self.width = self.imageData.shape[0]
         self.height = self.imageData.shape[1]
 
-    def process(self):
+    def load_files(self):
         # self.getSiteName()
+
         self.loadCalibrationData()
         self.loadNewIJ()
         self.loadBackgroundCorrection()
-        self.equalizeHistogram()
-        self.equalizeHistogram_trial()
+
+    def process(self):
         # self.removeStars()
+        self.equalizeHistogram()
         self.setLensFunction()
         self.calibrate()
         self.mercatorUnwrap(self.imageData)
@@ -82,7 +83,7 @@ class MANGOimage:
         self.elevation = np.array(calibrationData['Elevation'])
         self.i = np.array(calibrationData['i Coordinate'])
         self.j = np.array(calibrationData['j Coordinate'])
-        self.zenith = np.array(calibrationData.loc['Zenith', ['i Coordinate', 'j Coordinate']])
+        self.zenith = np.array(calibrationData.iloc[0].loc[['i Coordinate', 'j Coordinate']])
         self.zenithI = self.zenith[0]
         self.zenithJ = self.zenith[1]
 
@@ -100,8 +101,8 @@ class MANGOimage:
         self.backgroundCorrection = np.array(bg_corr_df)
 
     def equalizeHistogram(self):
+        self.EH = 'org'
         # Histogram Equalization to adjust contrast [1%-99%]
-        # i think i really need to understand this better
         # contrast = 99
         numberBins = 10000  # A good balance between time and space complexity, and well as precision
         imageHistogram, bins = np.histogram(self.imageData1D, numberBins)
@@ -120,21 +121,41 @@ class MANGOimage:
         highValueIndices = self.imageData1D > vmax
         self.imageData1D[highValueIndices] = vmax
         self.imageData = self.imageData1D.reshape(self.imageData.shape)
-        # return self.imageData
 
-    def equalizeHistogram_trial(self):
-        # Contrast stretching
+    def equalizeHistogram_trial1(self):
+        self.EH = 'skimage_eh_cs'
 
-        self.imageData1D_t = self.imageData1D.astype('uint8')
-        self.imageData_t = self.imageData1D_t.reshape([519, 695])
-        self.width = self.imageData_t.shape[0]
-        self.height = self.imageData_t.shape[1]
+        self.imageData1D = self.imageData1D.astype('uint8')
+        self.imageData = self.imageData1D.reshape([519, 695])
+        self.width = self.imageData.shape[0]
+        self.height = self.imageData.shape[1]
 
-        p1, p99 = np.percentile(self.imageData_t, (1, 99))
-        img_rescale = exposure.rescale_intensity(self.imageData_t, in_range=(p1, p99))
         # Equalization
-        img_eq = exposure.equalize_hist(self.imageData_t, nbins=10000)
-        self.imageData_t = img_eq
+        img_eq = exposure.equalize_hist(self.imageData, nbins=10000)
+        p1, p99 = np.percentile(self.imageData, (1, 99))
+        # Contrast stretching
+        img_eq = exposure.rescale_intensity(img_eq, in_range=(p1, p99))
+        print(img_eq.shape)
+        self.imageData = img_eq
+
+    def equalizeHistogram_trial2(self):
+        self.EH = 'mod_org'
+        # Histogram Equalization to adjust contrast [1%-99%]
+        # contrast = 99
+        numberBins = 10000  # A good balance between time and space complexity, and well as precision
+
+        # use _bincount_histogram here instead
+        imageHistogram, bins = exposure.histogram(self.imageData1D, numberBins)
+        imageHistogram = imageHistogram[1:]
+        bins = bins[1:]
+        cdf = imageHistogram.cumsum()
+        cdf = cdf[:9996]
+        cdf = cdf/float(cdf[-1])
+        # max_cdf = max(cdf)
+
+        self.imageData1D = np.interp(self.imageData1D, bins, cdf)
+        self.imageData = self.imageData1D.reshape(self.imageData.shape)
+
 
     def removeStars(self):
         filteredData = copy.copy(self.imageData).astype(float)
@@ -189,28 +210,25 @@ class MANGOimage:
         self.g = G_el * np.cos(np.radians(self.azimuth))
         firstColumn = np.ones(len(self.i))
         oneIJ = np.vstack((firstColumn, self.i, self.j)).transpose()
+        oneIJInverse = slg.pinv(oneIJ)
+        aCoefficients = np.dot(oneIJInverse, self.f)
+        bCoefficients = np.dot(oneIJInverse, self.g)
 
-        intermediate0 = np.dot(oneIJ.transpose(), oneIJ)
-        intermediate1 = np.linalg.pinv(intermediate0)
-        intermediate2 = np.dot(intermediate1, oneIJ.transpose())
+        a0 = aCoefficients[0]
+        a1 = aCoefficients[1]
+        a2 = aCoefficients[2]
+        b0 = bCoefficients[0]
+        b1 = bCoefficients[1]
+        b2 = bCoefficients[2]
 
-        aCoefficients = np.dot(intermediate2, self.f)
-        bCoefficients = np.dot(intermediate2, self.g)
-
-        self.a0 = aCoefficients[0]
-        self.a1 = aCoefficients[1]
-        self.a2 = aCoefficients[2]
-        self.b0 = bCoefficients[0]
-        self.b1 = bCoefficients[1]
-        self.b2 = bCoefficients[2]
-
-        rotationAngle_1 = np.degrees(np.arctan(-self.b1 / self.a1))
-        rotationAngle_2 = np.degrees(np.arctan(self.a2 / self.b2))
+        rotationAngle_1 = np.degrees(np.arctan(-b1 / a1))
+        rotationAngle_2 = np.degrees(np.arctan(a2 / b2))
         self.rotationAngle = .5 * (rotationAngle_1 + rotationAngle_2)
+        if 'EIO' in self.rawSitePath:
+            self.rotationAngle = self.rotationAngle + 180
         self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
                                                             self.rotationAngle, order=3)).astype(float)
-        self.imageData_t = np.fliplr(skimage.transform.rotate(self.imageData_t,
-                                                              self.rotationAngle, order=3)).astype(float)
+
         # Rotating Zenith Counter-clockwise by rotation angle and flipping it left-right
         zenithI = self.width - int(np.cos(np.radians(self.rotationAngle)) * (self.zenith[0] - self.width / 2) - np.sin(
             np.radians(self.rotationAngle)) * (self.zenith[1] - self.height / 2) + self.width / 2)
@@ -255,8 +273,10 @@ class MANGOimage:
         self.imageData = ID_array
 
     def writePNG(self):
-        writeAddress = os.path.join(self.processedImagesFolder, self.rawImage[0:8] + ".png")
-
+        # writeAddress = os.path.join(self.processedImagesFolder, self.rawImage[0:8] + "_" + self.EH + '_.png')
+        writeAddress = os.path.join(self.processedImagesFolder, self.rawImage[0:8] + '.png')
         finalImage = PIL.Image.fromarray(self.imageData, self.writeMode)
 
         finalImage.save(writeAddress, format='png')
+
+

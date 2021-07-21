@@ -1,27 +1,7 @@
 import os
 import ProcessImage
-
-
-def date_formatter(originalName):
-    dates = {
-        'Jan': '01',
-        'Feb': '02',
-        'Mar': '03',
-        'Apr': '04',
-        'May': '05',
-        'Jun': '06',
-        'Jul': '07',
-        'Aug': '08',
-        'Sep': '09',
-        'Oct': '10',
-        'Nov': '11',
-        'Dec': '12'
-    }
-    month = dates[originalName[:3]]
-    day = originalName[3:5]
-    year = '20' + originalName[5:]
-    converted_str = year + month + day
-    return converted_str
+import time
+import create_hdf5_files
 
 
 if __name__ == '__main__':
@@ -31,5 +11,10 @@ if __name__ == '__main__':
     rawPath = os.path.join(parentFolder, rawFolder)
     siteFolder = os.path.join(rawPath, siteName)
     list_of_dates = os.listdir(siteFolder)
-    for i in list_of_dates[:1]:
+    list_of_dates.remove('site_files')
+    start_time_org = time.time()
+    for i in list_of_dates:
+        start_time = time.time()
         var = ProcessImage.ProcessImage(siteName, i)
+        print('For image : ' + i + ' time taken = ', time.time() - start_time)
+    print('For all images time taken = ', time.time() - start_time_org)
