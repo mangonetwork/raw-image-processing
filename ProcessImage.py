@@ -26,8 +26,8 @@ class ProcessImage:
 
     def preprocessing(self):
         self.check_config()
-        self.build_specs(self.config)
-        self.directories = self.build_paths(self.custom, self.config)
+        self.build_specs()
+        self.directories = self.build_paths()
 
     def read_and_process(self):
         self.read_in_data()
@@ -41,18 +41,18 @@ class ProcessImage:
         self.specs = self.config['DEFAULT']['any_customization'] == 'Yes'
         self.custom = self.config['DEFAULT']['any_specification'] == 'Yes'
 
-    def build_specs(self, cf):
+    def build_specs(self):
         if self.specs:
-            self.siteName = cf['Specifications']['siteName']
-            self.siteDate = cf['Specifications']['siteDate']
+            self.siteName = self.config['Specifications']['siteName']
+            self.siteDate = self.config['Specifications']['siteDate']
 
-    def build_paths(self, custom, cf):
+    def build_paths(self):
         paths = {}
         rawFolder = "raw_data"
         siteFiles = "site_files"
         siteName = self.siteName
         siteDate = self.siteDate
-        if not custom:
+        if not self.custom:
             processedFolder = os.path.join('processed_data', 'processed_images')
             parentFolder = os.path.dirname(os.getcwd())
 
@@ -72,8 +72,8 @@ class ProcessImage:
             paths['processedImages'] = os.path.join(parentFolder, processedFolder, siteName, siteDate)
 
         for i in paths.keys():
-            if cf['Data Locations'][i] != '':
-                paths[i] = cf['Data Locations'][i]
+            if self.config['Data Locations'][i] != '':
+                paths[i] = self.config['Data Locations'][i]
 
         return paths
 
@@ -94,47 +94,28 @@ class ProcessImage:
         # process individual images
 
     def process_image(self):
+        self.all_images_for_day = {}
         for rawImage in self.rawList:
             rawImage = os.path.basename(rawImage)
             writeAddress = os.path.join(self.processedImagesFolder, rawImage[0:8] + ".png")
             if not os.path.exists(writeAddress):
-                img = MANGOimage.MANGOimage(self.directories, rawImage)
+                img = MANGOimage.MANGOimage(self.directories, rawImage, self.config, self.all_images_for_day)
                 img.load_files()
                 img.process()
 
     def write_to_hdf5(self):
-        siteInfoFile = "SiteInformation.csv"
-        pathToSiteFile = os.path.join(self.directories['rawData'], siteInfoFile)
-        pathToLatLon = os.path.join(self.directories['rawSiteFiles'], 'calibration')
-        pathToProcessedSite = os.path.dirname(self.processedImagesFolder)
-        create_hdf5_files.hdf5_file_info(pathToSiteFile, pathToProcessedSite, pathToLatLon, self.siteName, self.siteDate)
-
-
-def date_formatter(originalName):
-    dates = {
-        'Jan': '01',
-        'Feb': '02',
-        'Mar': '03',
-        'Apr': '04',
-        'May': '05',
-        'Jun': '06',
-        'Jul': '07',
-        'Aug': '08',
-        'Sep': '09',
-        'Oct': '10',
-        'Nov': '11',
-        'Dec': '12'
-    }
-    month = dates[originalName[:3]]
-    day = originalName[3:5]
-    year = '20' + originalName[5:]
-    converted_str = year + month + day
-    return converted_str
+        datadict = {}
+        siteInfoFile = 'SiteInformation.csv'
+        datadict['pathToSiteFile'] = os.path.join(self.directories['rawData'], siteInfoFile)
+        datadict['pathToLatLon'] = os.path.join(self.directories['rawSiteFiles'], 'calibration')
+        datadict['pathToProcessedSite'] = os.path.dirname(self.processedImagesFolder)
+        datadict['imageArrays'] = self.all_images_for_day
+        create_hdf5_files.hdf5_file_info(datadict, self.siteName, self.siteDate)
 
 
 if __name__ == '__main__':
 
-    siteName = "EIO"
-    date = "20210305"
+    siteName = "CFS"
+    date = "20160508"
 
     ProcessImage(siteName)

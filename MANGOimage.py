@@ -31,13 +31,11 @@ import os
 import copy
 import skimage.transform
 import pandas as pd
-from skimage import exposure
 import scipy.linalg as slg
 
 
-
 class MANGOimage:
-    def __init__(self, dirpaths, rawimg):
+    def __init__(self, dirpaths, rawimg, config, collective_img_dict):
         # list_of_dirs = ['parent', 'rawData', 'rawSite', 'rawSiteFiles', 'rawImages', 'processedImages']
         self.rawImage = rawimg
         self.parentPath = dirpaths['parent']
@@ -47,23 +45,25 @@ class MANGOimage:
         self.rawImagesPath = dirpaths['rawImages']
         self.rawImageAddress = os.path.join(self.rawImagesPath, rawimg)
         self.processedImagesFolder = dirpaths['processedImages']
+        self.siteImageDict = collective_img_dict
+
+        self.contrast = int(config['Specifications']['contrast'])
+
         try:
             self.loadFITS()
         except ValueError:
-            return
+            raise ValueError('Raw image file cannot be processed.')
 
     def loadFITS(self):
-
-        f = open(self.rawImageAddress, "rb")
-        a = np.fromfile(f, dtype='int16')
-        self.imageData1D = a[64:360769].astype('int32')
-        self.imageData = self.imageData1D.reshape([519, 695])
-        self.width = self.imageData.shape[0]
-        self.height = self.imageData.shape[1]
+        with open(self.rawImageAddress, "rb") as f:
+            a = np.fromfile(f, dtype='int16')
+            self.imageData1D = a[64:360769].astype('int32')
+            self.imageData = self.imageData1D.reshape([519, 695])
+            self.width = self.imageData.shape[0]
+            self.height = self.imageData.shape[1]
 
     def load_files(self):
         # self.getSiteName()
-
         self.loadCalibrationData()
         self.loadNewIJ()
         self.loadBackgroundCorrection()
@@ -101,19 +101,20 @@ class MANGOimage:
         self.backgroundCorrection = np.array(bg_corr_df)
 
     def equalizeHistogram(self):
-        self.EH = 'org'
         # Histogram Equalization to adjust contrast [1%-99%]
-        # contrast = 99
         numberBins = 10000  # A good balance between time and space complexity, and well as precision
         imageHistogram, bins = np.histogram(self.imageData1D, numberBins)
         imageHistogram = imageHistogram[1:]
         bins = bins[1:]
         cdf = np.cumsum(imageHistogram)
+
+        # spliced to cut off non-image area
         cdf = cdf[:9996]
 
         max_cdf = max(cdf)
-        maxIndex = np.argmin(abs(cdf - 0.99 * max_cdf))
-        minIndex = np.argmin(abs(cdf - 0.01 * max_cdf))
+        contrast = self.contrast
+        maxIndex = np.argmin(abs(cdf - contrast/100 * max_cdf))
+        minIndex = np.argmin(abs(cdf - (100 - contrast)/100 * max_cdf))
         vmax = float(bins[maxIndex])
         vmin = float(bins[minIndex])
         lowValueIndices = self.imageData1D < vmin
@@ -121,41 +122,6 @@ class MANGOimage:
         highValueIndices = self.imageData1D > vmax
         self.imageData1D[highValueIndices] = vmax
         self.imageData = self.imageData1D.reshape(self.imageData.shape)
-
-    def equalizeHistogram_trial1(self):
-        self.EH = 'skimage_eh_cs'
-
-        self.imageData1D = self.imageData1D.astype('uint8')
-        self.imageData = self.imageData1D.reshape([519, 695])
-        self.width = self.imageData.shape[0]
-        self.height = self.imageData.shape[1]
-
-        # Equalization
-        img_eq = exposure.equalize_hist(self.imageData, nbins=10000)
-        p1, p99 = np.percentile(self.imageData, (1, 99))
-        # Contrast stretching
-        img_eq = exposure.rescale_intensity(img_eq, in_range=(p1, p99))
-        print(img_eq.shape)
-        self.imageData = img_eq
-
-    def equalizeHistogram_trial2(self):
-        self.EH = 'mod_org'
-        # Histogram Equalization to adjust contrast [1%-99%]
-        # contrast = 99
-        numberBins = 10000  # A good balance between time and space complexity, and well as precision
-
-        # use _bincount_histogram here instead
-        imageHistogram, bins = exposure.histogram(self.imageData1D, numberBins)
-        imageHistogram = imageHistogram[1:]
-        bins = bins[1:]
-        cdf = imageHistogram.cumsum()
-        cdf = cdf[:9996]
-        cdf = cdf/float(cdf[-1])
-        # max_cdf = max(cdf)
-
-        self.imageData1D = np.interp(self.imageData1D, bins, cdf)
-        self.imageData = self.imageData1D.reshape(self.imageData.shape)
-
 
     def removeStars(self):
         filteredData = copy.copy(self.imageData).astype(float)
@@ -188,10 +154,6 @@ class MANGOimage:
         angleFromZenith = self.elevation[0] - self.elevation
         firstColumn = np.ones(len(distanceFromZenith))
 
-        distanceFromZenithMat = np.vstack(
-            [firstColumn, distanceFromZenith, distanceFromZenith ** 2, distanceFromZenith ** 3]).transpose()
-        self.pixToAngleCoefficients = np.flip(np.dot(np.linalg.pinv(distanceFromZenithMat), angleFromZenith))
-
         angleFromZenithMat = np.vstack(
             [firstColumn, angleFromZenith, angleFromZenith ** 2, angleFromZenith ** 3]).transpose()
         self.angleToPixCoefficients = np.flip(np.dot(np.linalg.pinv(angleFromZenithMat), distanceFromZenith))
@@ -205,7 +167,7 @@ class MANGOimage:
     def calibrate(self):
         # Spatial Calibration based on star data
         # self.zenith = np.array([self.i[0], self.j[0]])
-        G_el = 1.0 - self.getPixelsFromAngle(self.elevation) / self.fisheyeRadius
+        G_el = 1.0 - (self.getPixelsFromAngle(self.elevation) / self.fisheyeRadius)
         self.f = G_el * np.sin(np.radians(self.azimuth))
         self.g = G_el * np.cos(np.radians(self.azimuth))
         firstColumn = np.ones(len(self.i))
@@ -273,10 +235,7 @@ class MANGOimage:
         self.imageData = ID_array
 
     def writePNG(self):
-        # writeAddress = os.path.join(self.processedImagesFolder, self.rawImage[0:8] + "_" + self.EH + '_.png')
+        self.siteImageDict[str(self.rawImage)] = self.imageData
         writeAddress = os.path.join(self.processedImagesFolder, self.rawImage[0:8] + '.png')
         finalImage = PIL.Image.fromarray(self.imageData, self.writeMode)
-
         finalImage.save(writeAddress, format='png')
-
-

@@ -45,7 +45,11 @@ import pandas as pd
 
 # I modified the file so that it only works for one site
 
-def hdf5_file_info(sitefile, processedImageDir, latlondir, site, dateFolder=None):
+def hdf5_file_info(path_dict, site, dateFolder=None):
+    sitefile = path_dict['pathToSiteFile']
+    processedImageDir = path_dict['pathToProcessedSite']
+    latlondir = path_dict['pathToLatLon']
+
     # create site list from the site file and user input
     siteData = pd.read_csv(sitefile)
     site_list = siteData[siteData['Site Abbreviation'] == site]
@@ -96,9 +100,12 @@ def hdf5_file_info(sitefile, processedImageDir, latlondir, site, dateFolder=None
                 t = dt.datetime.strptime(timestring, '%H%M%S').replace(year=date.year, month=date.month,
                                                                        day=date.day)
                 times.append(t)
-
-            tstmp = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in times])
             images = np.array(images)
+            images_try = path_dict['imageArrays']
+            tstmp = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in times])
+            times_try = [dt.datetime.strptime(timestring[-11:-5], '%H%M%S').replace(
+                year=date.year, month=date.month, day=date.day) for timestring in images_try.keys()]
+            tstmp_try = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in times_try])
 
             # save hdf5 file
             f = h5py.File(filename, 'w')
