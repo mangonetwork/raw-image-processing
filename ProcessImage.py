@@ -52,24 +52,24 @@ class ProcessImage:
         siteFiles = "site_files"
         siteName = self.siteName
         siteDate = self.siteDate
-        if not self.custom:
-            processedFolder = os.path.join('processed_data', 'processed_images')
-            parentFolder = os.path.dirname(os.getcwd())
 
-            paths['parent'] = parentFolder
-            paths['rawData'] = os.path.join(parentFolder, rawFolder)
-            paths['rawSite'] = os.path.join(parentFolder, rawFolder, siteName)
-            paths['rawSiteFiles'] = os.path.join(parentFolder, rawFolder, siteName, siteFiles)
+        processedFolder = os.path.join('processed_data', 'processed_images')
+        parentFolder = os.path.dirname(os.getcwd())
 
-            if self.siteDate is None:
-                site_folder = next(os.walk(paths['rawSite']))[1]
-                site_folder.remove('site_files')
-                for siteDate in site_folder:
-                    ProcessImage(self.siteName, siteDate)
-                sys.exit('All dates for specified site have been processed.')
+        paths['parent'] = parentFolder
+        paths['rawData'] = os.path.join(parentFolder, rawFolder)
+        paths['rawSite'] = os.path.join(parentFolder, rawFolder, siteName)
+        paths['rawSiteFiles'] = os.path.join(parentFolder, rawFolder, siteName, siteFiles)
 
-            paths['rawImages'] = os.path.join(parentFolder, rawFolder, siteName, siteDate)
-            paths['processedImages'] = os.path.join(parentFolder, processedFolder, siteName, siteDate)
+        if self.siteDate is None:
+            site_folder = next(os.walk(paths['rawSite']))[1]
+            site_folder.remove('site_files')
+            for siteDate in site_folder:
+                ProcessImage(self.siteName, siteDate)
+            sys.exit('All dates for specified site have been processed.')
+
+        paths['rawImages'] = os.path.join(parentFolder, rawFolder, siteName, siteDate)
+        paths['processedImages'] = os.path.join(parentFolder, processedFolder, siteName, siteDate)
 
         for i in paths.keys():
             if self.config['Data Locations'][i] != '':
@@ -94,14 +94,12 @@ class ProcessImage:
         # process individual images
 
     def process_image(self):
-        self.all_images_for_day = {}
+        # self.all_images_for_day = {}
         for rawImage in self.rawList:
             rawImage = os.path.basename(rawImage)
             writeAddress = os.path.join(self.processedImagesFolder, rawImage[0:8] + ".png")
             if not os.path.exists(writeAddress):
                 img = MANGOimage.MANGOimage(self.directories, rawImage, self.config, self.all_images_for_day)
-                img.load_files()
-                img.process()
 
     def write_to_hdf5(self):
         datadict = {}

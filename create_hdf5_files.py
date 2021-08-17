@@ -96,7 +96,7 @@ def hdf5_file_info(path_dict, site, dateFolder=None):
                 img = Image.open(pimageaddress)
                 arrimg = np.array(img)
                 images.append(arrimg[:, :, 0])
-                timestring = pimageaddress[-11:-5]
+                timestring = pimageaddress[-10:-4]
                 t = dt.datetime.strptime(timestring, '%H%M%S').replace(year=date.year, month=date.month,
                                                                        day=date.day)
                 times.append(t)
