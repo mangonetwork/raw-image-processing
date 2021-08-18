@@ -8,7 +8,7 @@ import warnings
 import configparser
 
 import MANGOimagehdf5
-import create_hdf5_files
+import writeHDF5
 import sys
 import argparse
 
@@ -17,26 +17,32 @@ warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
 class ProcessImage:
 
-    def __init__(self, configFile, listOfFiles, outputFile):
+    def __init__(self, configFile, inputList, outputFile):
         # self.siteName = site
         # self.siteDate = date
         # self.specs = specs
         # self.custom_paths = check_config
-
-        self.check_config(configFile)
+        self.configFile = configFile
+        self.inputList = inputList
+        self.outputFile = outputFile
+        self.setup()
         self.read_and_process()
+
+    def setup(self):
+        self.check_config()
         self.build_specs()
         self.directories = self.build_paths()
 
     def read_and_process(self):
-        self.read_in_data()
-        self.process_image()
+        # self.read_in_data()
+        self.process_images()
         self.write_to_hdf5()
 
-    def check_config(self, file):
+    def check_config(self):
         # read in config file
         self.config = configparser.ConfigParser()
-        self.config.read(file)
+        self.config.read(self.configFile)
+        self.directories = self.config['Data Locations']
         self.specs = self.config['DEFAULT']['any_specification'] == 'Yes'
         self.custom_paths = self.config['DEFAULT']['any_path_customization'] == 'Yes'
 
@@ -47,7 +53,7 @@ class ProcessImage:
 
     def build_paths(self):
         paths = {}
-        rawFolder = "raw_data"
+        '''rawFolder = "raw_data"
         siteFiles = "site_files"
         siteName = self.siteName
         siteDate = self.siteDate
@@ -60,24 +66,26 @@ class ProcessImage:
         paths['rawSite'] = os.path.join(parentFolder, rawFolder, siteName)
         paths['rawSiteFiles'] = os.path.join(parentFolder, rawFolder, siteName, siteFiles)
 
-        '''if self.siteDate is None:
+        if self.siteDate is None:
             site_folder = next(os.walk(paths['rawSite']))[1]
             site_folder.remove('site_files')
             for siteDate in site_folder:
                 ProcessImage(self.siteName, siteDate)
-            sys.exit('All dates for specified site have been processed.')'''
+            sys.exit('All dates for specified site have been processed.')
 
         paths['rawImages'] = os.path.join(parentFolder, rawFolder, siteName, siteDate)
-        # paths['processedImages'] = os.path.join(parentFolder, processedFolder, siteName, siteDate)
+        paths['processedImages'] = os.path.join(parentFolder, processedFolder, siteName, siteDate)
 
-        if self.custom_paths:
-            for i in paths.keys():
-                if self.config['Data Locations'][i] != '':
-                    paths[i] = self.config['Data Locations'][i]
+        # if self.custom_paths:
+        
+        for i in paths.keys():
+            if self.config['Data Locations'][i] != '':
+                paths[i] = self.config['Data Locations'][i]
+        '''
 
-        return paths
+        return
 
-    def read_in_data(self, hdf5Files):
+    def read_in_data(self):
         # raw data --> one site --> images for one day
         # rawImagesPath = self.directories['rawImages']
         # rawSitePath = directories['rawSite']
@@ -92,24 +100,23 @@ class ProcessImage:
         # process individual images
         return
 
-    def process_images(self, hdf5Files):
-        self.all_images_for_day = []
-        self.rawList = hdf5Files
-        for rawImage in self.rawList:
-            rawImage = os.path.basename(rawImage)
+    def process_images(self):
+        self.imageArrays = []
+        self.rawList = self.inputList
+        for file in self.rawList:
             # writeAddress = os.path.join(self.processedImagesFolder, rawImage[0:-5] + ".png")
-            img = MANGOimagehdf5.MANGOimage(self.directories, rawImage, self.config, self.all_images_for_day)
-            img.load_files()
-            img.process()
+            MANGOimagehdf5.MANGOimage(self.directories, file, self.config, self.imageArrays)
 
-    def write_to_hdf5(self, outputFile):
+    def write_to_hdf5(self):
         datadict = {}
         siteInfoFile = 'SiteInformation.csv'
         datadict['pathToSiteFile'] = os.path.join(self.directories['rawData'], siteInfoFile)
         datadict['pathToLatLon'] = os.path.join(self.directories['rawSiteFiles'], 'calibration')
         # datadict['pathToProcessedSite'] = os.path.dirname(self.processedImagesFolder)
-        datadict['imageArrays'] = self.all_images_for_day
-        create_hdf5_files.hdf5_file_info(datadict, self.siteName, self.siteDate)
+        datadict['inputList'] = self.inputList
+        datadict['outputFile'] = self.outputFile
+        datadict['imageArrays'] = self.imageArrays
+        writeHDF5.hdf5_file_info(datadict, self.config)
 
 
 def parse_args():
@@ -121,11 +128,11 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Accepting config, input files and output file'
                                                  'to process MANGOImage.')
-    parser.add_argument('-c', '--config', type=argparse.FileType('r'),
+    parser.add_argument('-c', '--config', dest='config', type=argparse.FileType('r'),
                         help='Config file containing data locations and image specs.')
     parser.add_argument('-i', '--input', dest='inputs', nargs='+', type=argparse.FileType('r'),
                         help='A list of .hdf5 files to process and store in output file.')
-    parser.add_argument('-o', '--output', type=argparse.FileType('w'),
+    parser.add_argument('-o', '--output', dest='output', type=argparse.FileType('w+'),
                         help='Output file to write processed images to.')
     args = parser.parse_args()
 
@@ -139,7 +146,8 @@ def parse_args():
 
 if __name__ == '__main__':
     command_line_args = parse_args()
-    conf = command_line_args[0]
-    inputs = command_line_args[1]
-    output = command_line_args[2]
+    conf = command_line_args.config
+    inputs = command_line_args.inputs
+    output = command_line_args.output
+    print(conf, inputs, output)
     ProcessImage(conf, inputs, output)

@@ -40,13 +40,13 @@ class MANGOimage:
     def __init__(self, dirpaths, rawimg, config, collective_img_arr):
         # list_of_dirs = ['parent', 'rawData', 'rawSite', 'rawSiteFiles', 'rawImages', 'processedImages']
         self.rawImage = rawimg
-        self.parentPath = dirpaths['parent']
-        self.rawDataPath = dirpaths['rawData']
+        # self.parentPath = dirpaths['parent']
+        # self.rawDataPath = dirpaths['rawData']
         self.rawSitePath = dirpaths['rawSite']
         self.rawSiteFilesPath = dirpaths['rawSiteFiles']
         self.rawImagesPath = dirpaths['rawImages']
         self.rawImageAddress = os.path.join(self.rawImagesPath, rawimg)
-        self.processedImagesFolder = dirpaths['processedImages']
+        # self.processedImagesFolder = dirpaths['processedImages']
         self.imagesArray = collective_img_arr
 
         self.contrast = int(config['Specifications']['contrast'])
