@@ -37,17 +37,12 @@ from PIL import Image
 
 
 class MANGOimage:
-    def __init__(self, dirpaths, rawimg, config, collective_img_arr):
+    def __init__(self, rawimg, config, collective_img_arr):
         # list_of_dirs = ['parent', 'rawData', 'rawSite', 'rawSiteFiles', 'rawImages', 'processedImages']
         self.rawImage = rawimg
-        # self.parentPath = dirpaths['parent']
-        # self.rawDataPath = dirpaths['rawData']
-        self.rawSitePath = dirpaths['rawSite']
-        self.rawSiteFilesPath = dirpaths['rawSiteFiles']
-        self.rawImagesPath = dirpaths['rawImages']
-        self.rawImageAddress = os.path.join(self.rawImagesPath, rawimg)
-        # self.processedImagesFolder = dirpaths['processedImages']
-        self.imagesArray = collective_img_arr
+        self.config = config
+        self.rawSiteFilesPath = self.config['Data Locations']['rawSiteFiles']
+        self.allImagesArray = collective_img_arr
 
         self.contrast = int(config['Specifications']['contrast'])
 
@@ -59,20 +54,19 @@ class MANGOimage:
             raise ValueError('Raw image file cannot be processed.')
 
     def loadFITS(self):
-        data = h5py.File(self.rawImageAddress, 'r')
-        self.imageData = np.array(data['image'])
-        self.width = self.imageData.shape[0]
-        self.height = self.imageData.shape[1]
-        self.imageData1D = self.imageData.flatten()
+        data = h5py.File(self.rawImage, 'r')
+        self.imageData = data['image']
+        self.imageArray = np.array(data['image'])
+        self.width = self.imageData.attrs['width']
+        self.height = self.imageData.attrs['height']
+        self.imageArray1D = self.imageData.flatten()
 
     def load_files(self):
-        # self.getSiteName()
         self.loadCalibrationData()
         self.loadNewIJ()
         self.loadBackgroundCorrection()
 
     def process(self):
-        # self.removeStars()
         self.equalizeHistogram()
         # self.showImage()
         self.setLensFunction()
@@ -88,7 +82,7 @@ class MANGOimage:
         img.show()
 
     def loadCalibrationData(self):
-        calibrationFilename = os.path.join(self.rawSiteFilesPath, 'calibration', 'Calibration.csv')
+        calibrationFilename = self.config['Data Locations']['calibrationFile']
         calibrationData = pd.read_csv(calibrationFilename, delimiter=',', index_col='Star Name')
         self.azimuth = np.array(calibrationData['Azimuth'])
         self.elevation = np.array(calibrationData['Elevation'])
@@ -99,22 +93,22 @@ class MANGOimage:
         self.zenithJ = self.zenith[1]
 
     def loadNewIJ(self):
-        newIFilename = os.path.join(self.rawSiteFilesPath, 'calibration', 'newI.csv')
-        newJFilename = os.path.join(self.rawSiteFilesPath, 'calibration', 'newJ.csv')
+        newIFilename = os.path.join(self.rawSiteFilesPath, 'newI.csv')
+        newJFilename = os.path.join(self.rawSiteFilesPath, 'newJ.csv')
         nif_df = pd.read_csv(newIFilename, delimiter=',', header=None)
         self.newIMatrix = np.array(nif_df)
         njf_df = pd.read_csv(newJFilename, delimiter=',', header=None)
         self.newJMatrix = np.array(njf_df)
 
     def loadBackgroundCorrection(self):
-        backgroundCorrectionFilename = os.path.join(self.rawSiteFilesPath, 'calibration', 'backgroundCorrection.csv')
+        backgroundCorrectionFilename = os.path.join(self.rawSiteFilesPath, 'backgroundCorrection.csv')
         bg_corr_df = pd.read_csv(backgroundCorrectionFilename, delimiter=',', header=None)
         self.backgroundCorrection = np.array(bg_corr_df)
 
     def equalizeHistogram(self):
         # Histogram Equalization to adjust contrast [1%-99%]
         numberBins = 10000  # A good balance between time and space complexity, and well as precision
-        imageHistogram, bins = np.histogram(self.imageData1D, numberBins)
+        imageHistogram, bins = np.histogram(self.imageArray1D, numberBins)
         imageHistogram = imageHistogram[1:]
         bins = bins[1:]
         cdf = np.cumsum(imageHistogram)
@@ -128,11 +122,11 @@ class MANGOimage:
         minIndex = np.argmin(abs(cdf - (100 - contrast)/100 * max_cdf))
         vmax = float(bins[maxIndex])
         vmin = float(bins[minIndex])
-        lowValueIndices = self.imageData1D < vmin
-        self.imageData1D[lowValueIndices] = vmin
-        highValueIndices = self.imageData1D > vmax
-        self.imageData1D[highValueIndices] = vmax
-        self.imageData = self.imageData1D.reshape(self.imageData.shape)
+        lowValueIndices = self.imageArray1D < vmin
+        self.imageArray1D[lowValueIndices] = vmin
+        highValueIndices = self.imageArray1D > vmax
+        self.imageArray1D[highValueIndices] = vmax
+        self.imageData = self.imageArray1D.reshape(self.imageData.shape)
 
     def removeStars(self):
         filteredData = copy.copy(self.imageData).astype(float)
@@ -197,7 +191,7 @@ class MANGOimage:
         rotationAngle_1 = np.degrees(np.arctan(-b1 / a1))
         rotationAngle_2 = np.degrees(np.arctan(a2 / b2))
         self.rotationAngle = .5 * (rotationAngle_1 + rotationAngle_2)
-        if 'EIO' in self.rawSitePath:
+        if 'EIO' in self.rawSiteFilesPath:
             self.rotationAngle = self.rotationAngle + 180
         self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
                                                             self.rotationAngle, order=3)).astype(float)
@@ -245,10 +239,7 @@ class MANGOimage:
         alphaMask = alphaMask.astype('uint8')
         ID_array = np.dstack([interpolatedData, alphaMask])
         self.writeMode = 'LA'
-        self.imageData = ID_array
+        self.imageArray = ID_array
 
     def writePNG(self):
-        self.imagesArray= np.append(self.imagesArray, self.imageData)
-        # writeAddress = os.path.join(self.processedImagesFolder, self.rawImage[0:-5] + '.png')
-        # finalImage = PIL.Image.fromarray(self.imageData, self.writeMode)
-        # finalImage.save(writeAddress, format='png')
+        self.allImagesArray = np.append(self.allImagesArray, self.imageArray)

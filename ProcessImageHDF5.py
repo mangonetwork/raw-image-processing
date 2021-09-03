@@ -1,16 +1,13 @@
-import sys
-
-import MANGOimage
-# import create_hdf5_files
-import glob
-import os
 import warnings
 import configparser
 
 import MANGOimagehdf5
-import writeHDF5
-import sys
 import argparse
+import re
+import pandas as pd
+import datetime as dt
+import numpy as np
+import h5py
 
 warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
@@ -18,105 +15,117 @@ warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 class ProcessImage:
 
     def __init__(self, configFile, inputList, outputFile):
-        # self.siteName = site
-        # self.siteDate = date
-        # self.specs = specs
-        # self.custom_paths = check_config
         self.configFile = configFile
         self.inputList = inputList
         self.outputFile = outputFile
-        self.setup()
-        self.read_and_process()
-
-    def setup(self):
-        self.check_config()
-        self.build_specs()
-        self.directories = self.build_paths()
-
-    def read_and_process(self):
-        # self.read_in_data()
+        self.build_config()
         self.process_images()
         self.write_to_hdf5()
 
-    def check_config(self):
+    def build_config(self):
         # read in config file
         self.config = configparser.ConfigParser()
         self.config.read(self.configFile)
         self.directories = self.config['Data Locations']
-        self.specs = self.config['DEFAULT']['any_specification'] == 'Yes'
-        self.custom_paths = self.config['DEFAULT']['any_path_customization'] == 'Yes'
-
-    def build_specs(self):
-        # if self.specs:
-        self.siteName = self.config['Specifications']['siteName']
-        self.siteDate = self.config['Specifications']['siteDate']
-
-    def build_paths(self):
-        paths = {}
-        '''rawFolder = "raw_data"
-        siteFiles = "site_files"
-        siteName = self.siteName
-        siteDate = self.siteDate
-
-        # processedFolder = os.path.join('processed_data', 'processed_images')
-        parentFolder = os.path.dirname(os.getcwd())
-
-        paths['parent'] = parentFolder
-        paths['rawData'] = os.path.join(parentFolder, rawFolder)
-        paths['rawSite'] = os.path.join(parentFolder, rawFolder, siteName)
-        paths['rawSiteFiles'] = os.path.join(parentFolder, rawFolder, siteName, siteFiles)
-
-        if self.siteDate is None:
-            site_folder = next(os.walk(paths['rawSite']))[1]
-            site_folder.remove('site_files')
-            for siteDate in site_folder:
-                ProcessImage(self.siteName, siteDate)
-            sys.exit('All dates for specified site have been processed.')
-
-        paths['rawImages'] = os.path.join(parentFolder, rawFolder, siteName, siteDate)
-        paths['processedImages'] = os.path.join(parentFolder, processedFolder, siteName, siteDate)
-
-        # if self.custom_paths:
-        
-        for i in paths.keys():
-            if self.config['Data Locations'][i] != '':
-                paths[i] = self.config['Data Locations'][i]
-        '''
-
-        return
-
-    def read_in_data(self):
-        # raw data --> one site --> images for one day
-        # rawImagesPath = self.directories['rawImages']
-        # rawSitePath = directories['rawSite']
-        # list of raw images
-
-        # processed images location
-        # self.processedImagesFolder = self.directories['processedImages']
-
-        # if not os.path.isdir(self.processedImagesFolder):
-        # os.makedirs(self.processedImagesFolder)
-
-        # process individual images
-        return
 
     def process_images(self):
-        self.imageArrays = []
+        self.imageArrays = np.array([])
+        self.startTime = np.array([])
+        self.exposureTime = np.array([])
+        self.ccdTemp = np.array([])
         self.rawList = self.inputList
+        self.process_general_information(self.rawList[0])
         for file in self.rawList:
-            # writeAddress = os.path.join(self.processedImagesFolder, rawImage[0:-5] + ".png")
-            MANGOimagehdf5.MANGOimage(self.directories, file, self.config, self.imageArrays)
+            self.process_specific_information(file)
+            MANGOimagehdf5.MANGOimage(file, self.config, self.imageArrays)
+
+    def process_general_information(self, file):
+        hdf5_file = h5py.File(file, 'r')
+        data = hdf5_file['image']
+        self.code = data['station']
+        self.site_lat = data['latitude']
+        self.site_lon = data['longitude']
+        self.bin_x = data['bin_x']
+        self.bin_y = data['bin_y']
+        self.label = data['label']
+        data_split = re.findall(r'-(\d+)-', file)[0]
+        self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
+
+    def process_specific_information(self, file):
+        '''
+        Obtains the following attributes:
+        1. start_time
+        2. exposure_time
+        3. ccd_temp
+        :param file: input hdf5 file
+        :return: None
+        '''
+        img = h5py.File(file, 'r')['image']
+        self.startTime = np.append(self.startTime, img['start_time'])
+        self.exposureTime = np.append(self.exposureTime, img['start_time'])
+        self.ccdTemp = np.append(self.ccdTemp, img['start_time'])
 
     def write_to_hdf5(self):
-        datadict = {}
-        siteInfoFile = 'SiteInformation.csv'
-        datadict['pathToSiteFile'] = os.path.join(self.directories['rawData'], siteInfoFile)
-        datadict['pathToLatLon'] = os.path.join(self.directories['rawSiteFiles'], 'calibration')
-        # datadict['pathToProcessedSite'] = os.path.dirname(self.processedImagesFolder)
-        datadict['inputList'] = self.inputList
-        datadict['outputFile'] = self.outputFile
-        datadict['imageArrays'] = self.imageArrays
-        writeHDF5.hdf5_file_info(datadict, self.config)
+        sitefile = self.config['Data Locations']['siteInfoFile']
+        # create site list from the site file and user input
+        siteData = pd.read_csv(sitefile)
+        site_list = siteData[siteData['Site Abbreviation'] == self.code]
+
+        self.site_name = site_list['Site Name'].item()
+
+        # read lat/lon from where ever Latitude.csv and Longitude.csv are for that site
+        latDir = self.config['Data Locations']['latitudeFile']
+        lonDir = self.config['Data Locations']['longitudeFile']
+        try:
+            latitude = np.array(pd.read_csv(latDir, dtype=float, delimiter=','))
+            longitude = np.array(pd.read_csv(lonDir, dtype=float, delimiter=','))
+            longitude[longitude < 0] += 360.
+        except IOError:
+            print('Could not process {}!'.format(self.site_name))
+
+        self.endTime = self.startTime + self.exposureTime
+        tstmp_s = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.startTime])
+        tstmp_e = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.endTime])
+
+        # save hdf5 file
+        f = h5py.File(self.outputFile, 'w')
+        f.create_group('SiteInfo')
+
+        T = f.create_dataset('UnixTime', data=np.array([tstmp_s, tstmp_e]), compression='gzip', compression_opts=1)
+        T.attrs['Description'] = 'unix time stamp'
+        T.attrs['Unit'] = 'seconds'
+
+        Lat = f.create_dataset('Latitude', data=latitude, compression='gzip', compression_opts=1)
+        Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
+        Lat.attrs['Size'] = 'Ipixels x Jpixels'
+        Lat.attrs['Projection Altitude'] = 250
+        Lat.attrs['Unit'] = 'degrees'
+
+        Lon = f.create_dataset('Longitude', data=longitude, compression='gzip', compression_opts=1)
+        Lon.attrs['Description'] = 'geodetic longitude of each pixel projected to 250 km'
+        Lon.attrs['Size'] = 'Ipixels x Jpixels'
+        Lon.attrs['Projection Altitude'] = 250
+        Lon.attrs['Unit'] = 'degrees'
+
+        I = f.create_dataset('ImageData', data=self.imageArrays, compression='gzip', compression_opts=1)
+        I.attrs['Description'] = 'pixel values for images'
+        I.attrs['Site Abbreviation'] = self.code
+        I.attrs['Image label'] = self.label
+        I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
+
+        CCD = f.create_dataset('CCDTemperature', data=self.ccdTemp)
+        CCD.attrs['Description'] = 'Temperature of CCD'
+        CCD.attrs['Unit'] = 'degrees C'
+
+        N = f.create_dataset('SiteInfo/Name', data=self.site_name)
+        N.attrs['Description'] = 'site name'
+        C = f.create_dataset('SiteInfo/Code', data=self.code)
+        C.attrs['Description'] = 'one letter site abbreviation/code'
+        L = f.create_dataset('SiteInfo/Coordinates', data=[self.site_lat, self.site_lon])
+        L.attrs['Description'] = 'geodetic coordinates of site; [lat, lon]'
+        L.attrs['Unit'] = 'degrees'
+
+        f.close()
 
 
 def parse_args():
@@ -128,18 +137,13 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Accepting config, input files and output file'
                                                  'to process MANGOImage.')
-    parser.add_argument('-c', '--config', dest='config', type=argparse.FileType('r'),
+    parser.add_argument('-c', '--config', dest='config', type=str,
                         help='Config file containing data locations and image specs.')
-    parser.add_argument('-i', '--input', dest='inputs', nargs='+', type=argparse.FileType('r'),
+    parser.add_argument('-i', '--input', dest='inputs', nargs='+', type=str,
                         help='A list of .hdf5 files to process and store in output file.')
-    parser.add_argument('-o', '--output', dest='output', type=argparse.FileType('w+'),
+    parser.add_argument('-o', '--output', dest='output', type=str,
                         help='Output file to write processed images to.')
     args = parser.parse_args()
-
-    '''check = lambda filename: filename.lower().endswith('hdf5')
-    if not all(check(input_file.name) for input_file in args.inputs):
-        sys.stderr.write('All inputs must be .hdf5')
-        sys.exit(1)'''
 
     return args
 
@@ -149,5 +153,4 @@ if __name__ == '__main__':
     conf = command_line_args.config
     inputs = command_line_args.inputs
     output = command_line_args.output
-    print(conf, inputs, output)
     ProcessImage(conf, inputs, output)
