@@ -59,7 +59,7 @@ class MANGOimage:
         self.imageArray = np.array(data['image'])
         self.width = self.imageData.attrs['width']
         self.height = self.imageData.attrs['height']
-        self.imageArray1D = self.imageData.flatten()
+        self.imageArray1D = self.imageArray.flatten()
 
     def load_files(self):
         self.loadCalibrationData()
@@ -242,4 +242,9 @@ class MANGOimage:
         self.imageArray = ID_array
 
     def writePNG(self):
-        self.allImagesArray = np.append(self.allImagesArray, self.imageArray)
+        self.imageArray = [np.array(self.imageArray)]
+        if len(self.allImagesArray) == 0:
+            self.allImagesArray = self.imageArray
+        else:
+            self.allImagesArray = np.append(self.allImagesArray, self.imageArray, axis=0)
+

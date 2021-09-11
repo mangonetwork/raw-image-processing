@@ -29,25 +29,28 @@ class ProcessImage:
         self.directories = self.config['Data Locations']
 
     def process_images(self):
-        self.imageArrays = np.array([])
         self.startTime = np.array([])
         self.exposureTime = np.array([])
         self.ccdTemp = np.array([])
         self.rawList = self.inputList
+        self.imageArrays = np.array([])
         self.process_general_information(self.rawList[0])
         for file in self.rawList:
             self.process_specific_information(file)
-            MANGOimagehdf5.MANGOimage(file, self.config, self.imageArrays)
+            picture = MANGOimagehdf5.MANGOimage(file, self.config, self.imageArrays)
+            self.imageArrays = picture.allImagesArray
+
+        #self.imageArrays = np.array(self.imageDict.values(), dtype=np.ndarray)
 
     def process_general_information(self, file):
         hdf5_file = h5py.File(file, 'r')
         data = hdf5_file['image']
-        self.code = data['station']
-        self.site_lat = data['latitude']
-        self.site_lon = data['longitude']
-        self.bin_x = data['bin_x']
-        self.bin_y = data['bin_y']
-        self.label = data['label']
+        self.code = data.attrs['station']
+        self.site_lat = data.attrs['latitude']
+        self.site_lon = data.attrs['longitude']
+        self.bin_x = data.attrs['bin_x']
+        self.bin_y = data.attrs['bin_y']
+        self.label = data.attrs['label']
         data_split = re.findall(r'-(\d+)-', file)[0]
         self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
 
@@ -61,17 +64,14 @@ class ProcessImage:
         :return: None
         '''
         img = h5py.File(file, 'r')['image']
-        self.startTime = np.append(self.startTime, img['start_time'])
-        self.exposureTime = np.append(self.exposureTime, img['start_time'])
-        self.ccdTemp = np.append(self.ccdTemp, img['start_time'])
+        self.startTime = np.append(self.startTime, img.attrs['start_time'])
+        self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
+        self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])
 
     def write_to_hdf5(self):
         sitefile = self.config['Data Locations']['siteInfoFile']
         # create site list from the site file and user input
-        siteData = pd.read_csv(sitefile)
-        site_list = siteData[siteData['Site Abbreviation'] == self.code]
-
-        self.site_name = site_list['Site Name'].item()
+        self.site_name = 'Capitol Reef Field Station'
 
         # read lat/lon from where ever Latitude.csv and Longitude.csv are for that site
         latDir = self.config['Data Locations']['latitudeFile']
@@ -84,8 +84,10 @@ class ProcessImage:
             print('Could not process {}!'.format(self.site_name))
 
         self.endTime = self.startTime + self.exposureTime
-        tstmp_s = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.startTime])
-        tstmp_e = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.endTime])
+        # tstmp_s = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.startTime])
+        # tstmp_e = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.endTime])
+        tstmp_s = self.startTime
+        tstmp_e = self.endTime
 
         # save hdf5 file
         f = h5py.File(self.outputFile, 'w')
