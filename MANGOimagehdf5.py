@@ -46,6 +46,8 @@ class MANGOimage:
 
         self.contrast = int(config['Specifications']['contrast'])
 
+        # is this nessisary, or do we want to just let the original error appear
+        # these statements create a clean interface, but sometimes obtuse what the actual problem is
         try:
             self.loadFITS()
             self.load_files()
@@ -53,6 +55,8 @@ class MANGOimage:
         except ValueError:
             raise ValueError('Raw image file cannot be processed.')
 
+    # rename function?
+    # FITS are a very specific type of image file used by some (non-MANGO) cameras
     def loadFITS(self):
         data = h5py.File(self.rawImage, 'r')
         self.imageData = data['image']
@@ -77,10 +81,13 @@ class MANGOimage:
         self.writePNG()
         # self.showImage()
 
+    # function for debugging?
+    # fine to keep this, but make a note of it
     def showImage(self):
         img = Image.fromarray(self.imageData)
         img.show()
 
+    # change with new calibration format
     def loadCalibrationData(self):
         calibrationFilename = self.config['Data Locations']['calibrationFile']
         calibrationData = pd.read_csv(calibrationFilename, delimiter=',', index_col='Star Name')
@@ -92,6 +99,7 @@ class MANGOimage:
         self.zenithI = self.zenith[0]
         self.zenithJ = self.zenith[1]
 
+    # change with new calibration format
     def loadNewIJ(self):
         newIFilename = os.path.join(self.rawSiteFilesPath, 'newI.csv')
         newJFilename = os.path.join(self.rawSiteFilesPath, 'newJ.csv')
@@ -100,13 +108,17 @@ class MANGOimage:
         njf_df = pd.read_csv(newJFilename, delimiter=',', header=None)
         self.newJMatrix = np.array(njf_df)
 
+    # change with new calibration format
     def loadBackgroundCorrection(self):
         backgroundCorrectionFilename = os.path.join(self.rawSiteFilesPath, 'backgroundCorrection.csv')
         bg_corr_df = pd.read_csv(backgroundCorrectionFilename, delimiter=',', header=None)
         self.backgroundCorrection = np.array(bg_corr_df)
 
+    # We determined skimage does this equivilently, correct?
+    # We should use that if so
     def equalizeHistogram(self):
         # Histogram Equalization to adjust contrast [1%-99%]
+        # config file
         numberBins = 10000  # A good balance between time and space complexity, and well as precision
         imageHistogram, bins = np.histogram(self.imageArray1D, numberBins)
         imageHistogram = imageHistogram[1:]
@@ -114,6 +126,7 @@ class MANGOimage:
         cdf = np.cumsum(imageHistogram)
 
         # spliced to cut off non-image area
+        # any way to determine this dynamically?  How periminant is it?
         cdf = cdf[:9996]
 
         max_cdf = max(cdf)
@@ -128,6 +141,7 @@ class MANGOimage:
         self.imageArray1D[highValueIndices] = vmax
         self.imageData = self.imageArray1D.reshape(self.imageData.shape)
 
+    # function not currently used - revise later?
     def removeStars(self):
         filteredData = copy.copy(self.imageData).astype(float)
         for i in range(self.width):
@@ -151,6 +165,8 @@ class MANGOimage:
         self.imageData = np.reshape(
             griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='linear', fill_value=0), filteredData.shape)
 
+    # these will be read from the calibration file, not recalculated here, correct?
+    # If we don't currently have these values calcuatated from the calibration procedure, use the linear approximation
     def setLensFunction(self):
         # Calculates lens function coefficients for the equation: Angle = a0 + a1.px + a2.px^2 + a3.px^3
         xDiff = self.zenithI - self.i
@@ -191,10 +207,13 @@ class MANGOimage:
         rotationAngle_1 = np.degrees(np.arctan(-b1 / a1))
         rotationAngle_2 = np.degrees(np.arctan(a2 / b2))
         self.rotationAngle = .5 * (rotationAngle_1 + rotationAngle_2)
+        # just read rotation angle from calibration file, skip everything above this
         if 'EIO' in self.rawSiteFilesPath:
             self.rotationAngle = self.rotationAngle + 180
         self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
                                                             self.rotationAngle, order=3)).astype(float)
+
+        # What exactly is zenith and why is this nessisary?
 
         # Rotating Zenith Counter-clockwise by rotation angle and flipping it left-right
         zenithI = self.width - int(np.cos(np.radians(self.rotationAngle)) * (self.zenith[0] - self.width / 2) - np.sin(
@@ -206,6 +225,8 @@ class MANGOimage:
 
         # why do we call the lens function after calibration?
 
+    # What does this do??
+    # Should be able to add a NaN mask to just image array
     def mercatorUnwrap(self, ID_array):
         newImageWidth = 500
         newImageHeight = 500
@@ -246,5 +267,6 @@ class MANGOimage:
         if len(self.allImagesArray) == 0:
             self.allImagesArray = self.imageArray
         else:
+            # This stacking should probably happen in main processing image script
+            # MangoImage.py should only be aware of a single image file
             self.allImagesArray = np.append(self.allImagesArray, self.imageArray, axis=0)
-

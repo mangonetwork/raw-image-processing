@@ -11,6 +11,7 @@ import h5py
 
 warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
+# Need docstrings throughout
 
 class ProcessImage:
 
@@ -27,6 +28,7 @@ class ProcessImage:
         self.config = configparser.ConfigParser()
         self.config.read(self.configFile)
         self.directories = self.config['Data Locations']
+        # is only one value needed from this config file?  Can probably do away with it
 
     def process_images(self):
         self.startTime = np.array([])
@@ -42,7 +44,10 @@ class ProcessImage:
 
         #self.imageArrays = np.array(self.imageDict.values(), dtype=np.ndarray)
 
+# potentially combine these two functions?
+# depends on overhead of opening single hdf5 file multiple times
     def process_general_information(self, file):
+        # with construct here as well
         hdf5_file = h5py.File(file, 'r')
         data = hdf5_file['image']
         self.code = data.attrs['station']
@@ -63,16 +68,19 @@ class ProcessImage:
         :param file: input hdf5 file
         :return: None
         '''
+        # Use with construct here?  Avoid leaving files opeen
         img = h5py.File(file, 'r')['image']
         self.startTime = np.append(self.startTime, img.attrs['start_time'])
         self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])
 
     def write_to_hdf5(self):
-        sitefile = self.config['Data Locations']['siteInfoFile']
+        sitefile = self.config['Data Locations']['siteInfoFile']    # Not used?
         # create site list from the site file and user input
-        self.site_name = 'Capitol Reef Field Station'
+        self.site_name = 'Capitol Reef Field Station'   # temporary hard-coding - let's make sure to make a note of this
 
+        # Move this to a different function
+        # this function should ONLY be writting the output hdf5
         # read lat/lon from where ever Latitude.csv and Longitude.csv are for that site
         latDir = self.config['Data Locations']['latitudeFile']
         lonDir = self.config['Data Locations']['longitudeFile']
@@ -90,6 +98,7 @@ class ProcessImage:
         tstmp_e = self.endTime
 
         # save hdf5 file
+        # with statement here
         f = h5py.File(self.outputFile, 'w')
         f.create_group('SiteInfo')
 
@@ -97,6 +106,9 @@ class ProcessImage:
         T.attrs['Description'] = 'unix time stamp'
         T.attrs['Unit'] = 'seconds'
 
+        # 250 km should be read in from somewhere - calibration file?
+        # this is associated with the locations of the latitude, so that would make sense
+        # Consider just copying array with attached attributes from calibration file?
         Lat = f.create_dataset('Latitude', data=latitude, compression='gzip', compression_opts=1)
         Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
         Lat.attrs['Size'] = 'Ipixels x Jpixels'
