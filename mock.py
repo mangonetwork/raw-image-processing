@@ -3,27 +3,32 @@ import os
 import numpy as np
 import pandas as pd
 
+sitepath = '/Users/leslie/Desktop/Projects/MANGO/raw-image-processing/Sites/CRFS'
+
 def write_to_mock():
 
     f = h5py.File('mock.hdf5', 'w')
-    sitepath = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration"
+    # sitepath = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration"
     newIFilename = os.path.join(sitepath, 'newI.csv')
-    nifarray = np.array(pd.read_csv(newIFilename))
+    nifarray = np.array(pd.read_csv(newIFilename, header=None))
 
     newJFilename = os.path.join(sitepath, 'newJ.csv')
-    njfarray = np.array(pd.read_csv(newJFilename))
+    njfarray = np.array(pd.read_csv(newJFilename, header=None))
 
     backgroundCorrectionFilename = os.path.join(sitepath, 'backgroundCorrection.csv')
-    bcfarray = np.array(pd.read_csv(backgroundCorrectionFilename))
+    bcfarray = np.array(pd.read_csv(backgroundCorrectionFilename, header=None))
 
-    calibrationFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Calibration.csv"
-    calarray = np.array(pd.read_csv(calibrationFile))
+    # calibrationFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Calibration.csv"
+    calibrationFile = os.path.join(sitepath, 'Calibration.csv')
+    calarray = np.array(pd.read_csv(calibrationFile, header=None))
 
-    latitudeFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Latitudes.csv"
-    latarray = np.array(pd.read_csv(latitudeFile))
+    # latitudeFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Latitudes.csv"
+    latitudeFile = os.path.join(sitepath, 'Latitudes.csv')
+    latarray = np.array(pd.read_csv(latitudeFile, header=None))
 
-    longitudeFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Longitudes.csv"
-    lonarray = np.array(pd.read_csv(longitudeFile))
+    # longitudeFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Longitudes.csv"
+    longitudeFile = os.path.join(sitepath, 'Longitudes.csv')
+    lonarray = np.array(pd.read_csv(longitudeFile, header=None))
 
     Lat = f.create_dataset('Latitude', data=latarray, compression='gzip', compression_opts=1)
     Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
