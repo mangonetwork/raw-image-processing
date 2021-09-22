@@ -41,7 +41,8 @@ class MANGOimage:
         # list_of_dirs = ['parent', 'rawData', 'rawSite', 'rawSiteFiles', 'rawImages', 'processedImages']
         self.rawImage = rawimg
         self.config = config
-        self.rawSiteFilesPath = self.config['Data Locations']['rawSiteFiles']
+        # self.rawSiteFilesPath = self.config['Data Locations']['rawSiteFiles']
+        self.cal_hdf = self.config['Data Locations']['cal_hdf']
         self.allImagesArray = collective_img_arr
 
         self.contrast = int(config['Specifications']['contrast'])
@@ -66,14 +67,14 @@ class MANGOimage:
         self.imageArray1D = self.imageArray.flatten()
 
     def load_files(self):
-        self.loadCalibrationData()
+        # self.loadCalibrationData()
         self.loadNewIJ()
         self.loadBackgroundCorrection()
 
     def process(self):
         self.equalizeHistogram()
         # self.showImage()
-        self.setLensFunction()
+        # self.setLensFunction()
         self.calibrate()
         # self.showImage()
         self.mercatorUnwrap(self.imageData)
@@ -87,32 +88,44 @@ class MANGOimage:
         img = Image.fromarray(self.imageData)
         img.show()
 
-    # change with new calibration format
-    def loadCalibrationData(self):
-        calibrationFilename = self.config['Data Locations']['calibrationFile']
-        calibrationData = pd.read_csv(calibrationFilename, delimiter=',', index_col='Star Name')
-        self.azimuth = np.array(calibrationData['Azimuth'])
-        self.elevation = np.array(calibrationData['Elevation'])
-        self.i = np.array(calibrationData['i Coordinate'])
-        self.j = np.array(calibrationData['j Coordinate'])
-        self.zenith = np.array(calibrationData.iloc[0].loc[['i Coordinate', 'j Coordinate']])
-        self.zenithI = self.zenith[0]
-        self.zenithJ = self.zenith[1]
+    # # change with new calibration format
+    # def loadCalibrationData(self):
+    #     # these values should be in the calibration hdf5 file
+    #     calibrationFilename = self.config['Data Locations']['calibrationFile']
+    #     calibrationData = pd.read_csv(calibrationFilename, delimiter=',', index_col='Star Name')
+    #     self.azimuth = np.array(calibrationData['Azimuth'])
+    #     self.elevation = np.array(calibrationData['Elevation'])
+    #     self.i = np.array(calibrationData['i Coordinate'])
+    #     self.j = np.array(calibrationData['j Coordinate'])
+    #     self.zenith = np.array(calibrationData.iloc[0].loc[['i Coordinate', 'j Coordinate']])
+    #     self.zenithI = self.zenith[0]
+    #     self.zenithJ = self.zenith[1]
 
     # change with new calibration format
     def loadNewIJ(self):
-        newIFilename = os.path.join(self.rawSiteFilesPath, 'newI.csv')
-        newJFilename = os.path.join(self.rawSiteFilesPath, 'newJ.csv')
-        nif_df = pd.read_csv(newIFilename, delimiter=',', header=None)
-        self.newIMatrix = np.array(nif_df)
-        njf_df = pd.read_csv(newJFilename, delimiter=',', header=None)
-        self.newJMatrix = np.array(njf_df)
+        # newIFilename = os.path.join(self.rawSiteFilesPath, 'newI.csv')
+        # newJFilename = os.path.join(self.rawSiteFilesPath, 'newJ.csv')
+        # nif_df = pd.read_csv(newIFilename, delimiter=',', header=None)
+        # self.newIMatrix = np.array(nif_df)
+        # njf_df = pd.read_csv(newJFilename, delimiter=',', header=None)
+        # self.newJMatrix = np.array(njf_df)
+        # print('NewI, NewJ')
+        # print(self.newIMatrix.shape, self.newJMatrix.shape)
+        with h5py.File(self.cal_hdf, 'r') as f:
+            self.newIMatrix = f['New I array'][:]
+            self.newJMatrix = f['New J array'][:]
+        # print(self.newIMatrix.shape, self.newJMatrix.shape)
 
     # change with new calibration format
     def loadBackgroundCorrection(self):
-        backgroundCorrectionFilename = os.path.join(self.rawSiteFilesPath, 'backgroundCorrection.csv')
-        bg_corr_df = pd.read_csv(backgroundCorrectionFilename, delimiter=',', header=None)
-        self.backgroundCorrection = np.array(bg_corr_df)
+        # backgroundCorrectionFilename = os.path.join(self.rawSiteFilesPath, 'backgroundCorrection.csv')
+        # bg_corr_df = pd.read_csv(backgroundCorrectionFilename, delimiter=',', header=None)
+        # self.backgroundCorrection = np.array(bg_corr_df)
+        # print('Background Correction')
+        # print(self.backgroundCorrection.shape)
+        with h5py.File(self.cal_hdf, 'r') as f:
+            self.backgroundCorrection = f['Background Correction Array'][:]
+        # print(self.backgroundCorrection.shape)
 
     # We determined skimage does this equivilently, correct?
     # We should use that if so
@@ -165,67 +178,71 @@ class MANGOimage:
         self.imageData = np.reshape(
             griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='linear', fill_value=0), filteredData.shape)
 
-    # these will be read from the calibration file, not recalculated here, correct?
-    # If we don't currently have these values calcuatated from the calibration procedure, use the linear approximation
-    def setLensFunction(self):
-        # Calculates lens function coefficients for the equation: Angle = a0 + a1.px + a2.px^2 + a3.px^3
-        xDiff = self.zenithI - self.i
-        yDiff = self.zenithJ - self.j
-        distanceFromZenith = np.sqrt(xDiff ** 2 + yDiff ** 2)
-        angleFromZenith = self.elevation[0] - self.elevation
-        firstColumn = np.ones(len(distanceFromZenith))
-
-        angleFromZenithMat = np.vstack(
-            [firstColumn, angleFromZenith, angleFromZenith ** 2, angleFromZenith ** 3]).transpose()
-        self.angleToPixCoefficients = np.flip(np.dot(np.linalg.pinv(angleFromZenithMat), distanceFromZenith))
-
-        self.fisheyeRadius = self.getPixelsFromAngle(90)
-
-    def getPixelsFromAngle(self, angle):
-        # Input Angle in degrees
-        return np.polyval(self.angleToPixCoefficients, angle)
+    # # these will be read from the calibration file, not recalculated here, correct?
+    # # If we don't currently have these values calcuatated from the calibration procedure, use the linear approximation
+    # def setLensFunction(self):
+    #     # Calculates lens function coefficients for the equation: Angle = a0 + a1.px + a2.px^2 + a3.px^3
+    #     xDiff = self.zenithI - self.i
+    #     yDiff = self.zenithJ - self.j
+    #     distanceFromZenith = np.sqrt(xDiff ** 2 + yDiff ** 2)
+    #     angleFromZenith = self.elevation[0] - self.elevation
+    #     firstColumn = np.ones(len(distanceFromZenith))
+    #
+    #     angleFromZenithMat = np.vstack(
+    #         [firstColumn, angleFromZenith, angleFromZenith ** 2, angleFromZenith ** 3]).transpose()
+    #     self.angleToPixCoefficients = np.flip(np.dot(np.linalg.pinv(angleFromZenithMat), distanceFromZenith))
+    #
+    #     self.fisheyeRadius = self.getPixelsFromAngle(90)
+    #
+    # def getPixelsFromAngle(self, angle):
+    #     # Input Angle in degrees
+    #     return np.polyval(self.angleToPixCoefficients, angle)
 
     def calibrate(self):
-        # Spatial Calibration based on star data
-        # self.zenith = np.array([self.i[0], self.j[0]])
-        G_el = 1.0 - (self.getPixelsFromAngle(self.elevation) / self.fisheyeRadius)
-        self.f = G_el * np.sin(np.radians(self.azimuth))
-        self.g = G_el * np.cos(np.radians(self.azimuth))
-        firstColumn = np.ones(len(self.i))
-        oneIJ = np.vstack((firstColumn, self.i, self.j)).transpose()
-        oneIJInverse = slg.pinv(oneIJ)
-        aCoefficients = np.dot(oneIJInverse, self.f)
-        bCoefficients = np.dot(oneIJInverse, self.g)
+        # # Spatial Calibration based on star data
+        # # self.zenith = np.array([self.i[0], self.j[0]])
+        # G_el = 1.0 - (self.getPixelsFromAngle(self.elevation) / self.fisheyeRadius)
+        # self.f = G_el * np.sin(np.radians(self.azimuth))
+        # self.g = G_el * np.cos(np.radians(self.azimuth))
+        # firstColumn = np.ones(len(self.i))
+        # oneIJ = np.vstack((firstColumn, self.i, self.j)).transpose()
+        # oneIJInverse = slg.pinv(oneIJ)
+        # aCoefficients = np.dot(oneIJInverse, self.f)
+        # bCoefficients = np.dot(oneIJInverse, self.g)
+        #
+        # a0 = aCoefficients[0]
+        # a1 = aCoefficients[1]
+        # a2 = aCoefficients[2]
+        # b0 = bCoefficients[0]
+        # b1 = bCoefficients[1]
+        # b2 = bCoefficients[2]
+        #
+        # rotationAngle_1 = np.degrees(np.arctan(-b1 / a1))
+        # rotationAngle_2 = np.degrees(np.arctan(a2 / b2))
+        # self.rotationAngle = .5 * (rotationAngle_1 + rotationAngle_2)
+        # # just read rotation angle from calibration file, skip everything above this
+        # # Let's correct this just in the calibration file for now
+        # if 'EIO' in self.rawSiteFilesPath:
+        #     self.rotationAngle = self.rotationAngle + 180
 
-        a0 = aCoefficients[0]
-        a1 = aCoefficients[1]
-        a2 = aCoefficients[2]
-        b0 = bCoefficients[0]
-        b1 = bCoefficients[1]
-        b2 = bCoefficients[2]
-
-        rotationAngle_1 = np.degrees(np.arctan(-b1 / a1))
-        rotationAngle_2 = np.degrees(np.arctan(a2 / b2))
-        self.rotationAngle = .5 * (rotationAngle_1 + rotationAngle_2)
-        # just read rotation angle from calibration file, skip everything above this
-        if 'EIO' in self.rawSiteFilesPath:
-            self.rotationAngle = self.rotationAngle + 180
+        self.rotationAngle = 10.
         self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
                                                             self.rotationAngle, order=3)).astype(float)
 
         # What exactly is zenith and why is this nessisary?
 
-        # Rotating Zenith Counter-clockwise by rotation angle and flipping it left-right
-        zenithI = self.width - int(np.cos(np.radians(self.rotationAngle)) * (self.zenith[0] - self.width / 2) - np.sin(
-            np.radians(self.rotationAngle)) * (self.zenith[1] - self.height / 2) + self.width / 2)
-        zenithJ = int(np.sin(np.radians(self.rotationAngle)) * (self.zenith[0] - self.width / 2) + np.cos(
-            np.radians(self.rotationAngle)) * (self.zenith[1] - self.height / 2) + self.height / 2)
-        self.zenith = [zenithI, zenithJ]
-        #self.setLensFunction()
+        # # Rotating Zenith Counter-clockwise by rotation angle and flipping it left-right
+        # zenithI = self.width - int(np.cos(np.radians(self.rotationAngle)) * (self.zenith[0] - self.width / 2) - np.sin(
+        #     np.radians(self.rotationAngle)) * (self.zenith[1] - self.height / 2) + self.width / 2)
+        # zenithJ = int(np.sin(np.radians(self.rotationAngle)) * (self.zenith[0] - self.width / 2) + np.cos(
+        #     np.radians(self.rotationAngle)) * (self.zenith[1] - self.height / 2) + self.height / 2)
+        # self.zenith = [zenithI, zenithJ]
+        # #self.setLensFunction()
 
         # why do we call the lens function after calibration?
 
     # What does this do??
+    # is the effetively where the Fish-Eye dewarping occurs?
     # Should be able to add a NaN mask to just image array
     def mercatorUnwrap(self, ID_array):
         newImageWidth = 500

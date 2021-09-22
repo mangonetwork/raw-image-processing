@@ -27,7 +27,7 @@ class ProcessImage:
         # read in config file
         self.config = configparser.ConfigParser()
         self.config.read(self.configFile)
-        self.directories = self.config['Data Locations']
+        # self.directories = self.config['Data Locations']
         # is only one value needed from this config file?  Can probably do away with it
 
     def process_images(self):
