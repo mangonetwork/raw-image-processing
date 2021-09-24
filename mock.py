@@ -52,7 +52,7 @@ def write_to_mock():
     backgroundCorrection = f.create_dataset('Background Correction Array', data=bcfarray, compression='gzip', compression_opts=1)
     backgroundCorrection.attrs['Description'] = 'Background correction array used for masking in mercator unwrapping function in MANGOimage.py'
 
-    calibration = f.create_dataset('Calibration Angle', data=[200], compression='gzip', compression_opts=1)
+    calibration = f.create_dataset('Calibration Angle', data=[10], compression='gzip', compression_opts=1)
     calibration.attrs['Unit'] = 'degrees (to rotate anticlockwise)'
     f.close()
 
