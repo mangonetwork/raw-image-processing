@@ -21,6 +21,7 @@ class ProcessImage:
         self.outputFile = outputFile
         self.build_config()
         self.process_images()
+        self.read_lat_lon()
         self.write_to_hdf5()
 
     def build_config(self):
@@ -82,22 +83,16 @@ class ProcessImage:
         self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])
 
-    def write_to_hdf5(self):
-        sitefile = self.config['Data Locations']['siteInfoFile']    # Not used?
-        # create site list from the site file and user input
-        self.site_name = 'Capitol Reef Field Station'   # temporary hard-coding - let's make sure to make a note of this
+    def read_lat_lon(self):
+        # Read in Latitude and Longitude arrays
+        with h5py.File(self.config['Data Locations']['cal_hdf'], 'r') as f:
+            self.latitude = f['Latitude'][:]
+            self.longitude = f['Longitude'][:]
+        self.longitude[self.longitude<0.] +=360.
 
-        # Move this to a different function
-        # this function should ONLY be writting the output hdf5
-        # read lat/lon from where ever Latitude.csv and Longitude.csv are for that site
-        latDir = self.config['Data Locations']['latitudeFile']
-        lonDir = self.config['Data Locations']['longitudeFile']
-        try:
-            latitude = np.array(pd.read_csv(latDir, dtype=float, delimiter=','))
-            longitude = np.array(pd.read_csv(lonDir, dtype=float, delimiter=','))
-            longitude[longitude < 0] += 360.
-        except IOError:
-            print('Could not process {}!'.format(self.site_name))
+
+
+    def write_to_hdf5(self):
 
         self.endTime = self.startTime + self.exposureTime
         # tstmp_s = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.startTime])
@@ -106,48 +101,45 @@ class ProcessImage:
         tstmp_e = self.endTime
 
         # save hdf5 file
-        # with statement here
-        f = h5py.File(self.outputFile, 'w')
-        f.create_group('SiteInfo')
+        with h5py.File(self.outputFile, 'w') as f:
+            f.create_group('SiteInfo')
 
-        T = f.create_dataset('UnixTime', data=np.array([tstmp_s, tstmp_e]), compression='gzip', compression_opts=1)
-        T.attrs['Description'] = 'unix time stamp'
-        T.attrs['Unit'] = 'seconds'
+            T = f.create_dataset('UnixTime', data=np.array([tstmp_s, tstmp_e]), compression='gzip', compression_opts=1)
+            T.attrs['Description'] = 'unix time stamp'
+            T.attrs['Unit'] = 'seconds'
 
-        # 250 km should be read in from somewhere - calibration file?
-        # this is associated with the locations of the latitude, so that would make sense
-        # Consider just copying array with attached attributes from calibration file?
-        Lat = f.create_dataset('Latitude', data=latitude, compression='gzip', compression_opts=1)
-        Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
-        Lat.attrs['Size'] = 'Ipixels x Jpixels'
-        Lat.attrs['Projection Altitude'] = 250
-        Lat.attrs['Unit'] = 'degrees'
+            # 250 km should be read in from somewhere - calibration file?
+            # this is associated with the locations of the latitude, so that would make sense
+            # Consider just copying array with attached attributes from calibration file?
+            Lat = f.create_dataset('Latitude', data=self.latitude, compression='gzip', compression_opts=1)
+            Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
+            Lat.attrs['Size'] = 'Ipixels x Jpixels'
+            Lat.attrs['Projection Altitude'] = 250
+            Lat.attrs['Unit'] = 'degrees'
 
-        Lon = f.create_dataset('Longitude', data=longitude, compression='gzip', compression_opts=1)
-        Lon.attrs['Description'] = 'geodetic longitude of each pixel projected to 250 km'
-        Lon.attrs['Size'] = 'Ipixels x Jpixels'
-        Lon.attrs['Projection Altitude'] = 250
-        Lon.attrs['Unit'] = 'degrees'
+            Lon = f.create_dataset('Longitude', data=self.longitude, compression='gzip', compression_opts=1)
+            Lon.attrs['Description'] = 'geodetic longitude of each pixel projected to 250 km'
+            Lon.attrs['Size'] = 'Ipixels x Jpixels'
+            Lon.attrs['Projection Altitude'] = 250
+            Lon.attrs['Unit'] = 'degrees'
 
-        I = f.create_dataset('ImageData', data=self.imageArrays, compression='gzip', compression_opts=1)
-        I.attrs['Description'] = 'pixel values for images'
-        I.attrs['Site Abbreviation'] = self.code
-        I.attrs['Image label'] = self.label
-        I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
+            I = f.create_dataset('ImageData', data=self.imageArrays, compression='gzip', compression_opts=1)
+            I.attrs['Description'] = 'pixel values for images'
+            I.attrs['Site Abbreviation'] = self.code
+            I.attrs['Image label'] = self.label
+            I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
 
-        CCD = f.create_dataset('CCDTemperature', data=self.ccdTemp)
-        CCD.attrs['Description'] = 'Temperature of CCD'
-        CCD.attrs['Unit'] = 'degrees C'
+            CCD = f.create_dataset('CCDTemperature', data=self.ccdTemp)
+            CCD.attrs['Description'] = 'Temperature of CCD'
+            CCD.attrs['Unit'] = 'degrees C'
 
-        N = f.create_dataset('SiteInfo/Name', data=self.site_name)
-        N.attrs['Description'] = 'site name'
-        C = f.create_dataset('SiteInfo/Code', data=self.code)
-        C.attrs['Description'] = 'one letter site abbreviation/code'
-        L = f.create_dataset('SiteInfo/Coordinates', data=[self.site_lat, self.site_lon])
-        L.attrs['Description'] = 'geodetic coordinates of site; [lat, lon]'
-        L.attrs['Unit'] = 'degrees'
-
-        f.close()
+            N = f.create_dataset('SiteInfo/Name', data=self.config['Specifications']['siteName'])
+            N.attrs['Description'] = 'site name'
+            C = f.create_dataset('SiteInfo/Code', data=self.code)
+            C.attrs['Description'] = 'one letter site abbreviation/code'
+            L = f.create_dataset('SiteInfo/Coordinates', data=[self.site_lat, self.site_lon])
+            L.attrs['Description'] = 'geodetic coordinates of site; [lat, lon]'
+            L.attrs['Unit'] = 'degrees'
 
 
 def parse_args():
