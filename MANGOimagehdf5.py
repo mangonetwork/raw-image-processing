@@ -41,20 +41,17 @@ class MANGOimage:
         self.cal_hdf = self.config['Data Locations']['cal_hdf']
         self.contrast = int(config['Specifications']['contrast'])
 
-        self.loadFITS()
-        self.load_files()
+        self.load_image()
+        self.load_caldata()
         self.process()
 
-    # rename function?
-    # FITS are a very specific type of image file used by some (non-MANGO) cameras
-    def loadFITS(self):
+    def load_image(self):
         self.imageData = self.rawImage['image'][:]
         self.width = self.rawImage['image'].attrs['width']
         self.height = self.rawImage['image'].attrs['height']
 
-    def load_files(self):
+    def load_caldata(self):
         # load data from calibration array
-        # self.loadCalibrationData()
         with h5py.File(self.cal_hdf, 'r') as f:
             self.newIMatrix = f['New I array'][:]
             self.newJMatrix = f['New J array'][:]

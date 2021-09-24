@@ -13,26 +13,23 @@ warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
 # Need docstrings throughout
 
+# PASSING ARGUMENTS vs class attributes???
+
 class ProcessImage:
 
     def __init__(self, configFile, inputList, outputFile):
         self.configFile = configFile
         self.inputList = inputList
         self.outputFile = outputFile
-        self.build_config()
+        self.read_config()
         self.process_images()
         self.read_lat_lon()
         self.write_to_hdf5()
 
-    def build_config(self):
+    def read_config(self):
         # read in config file
         self.config = configparser.ConfigParser()
         self.config.read(self.configFile)
-        # self.directories = self.config['Data Locations']
-        # is only one value needed from this config file?  Can probably do away with it
-
-    # def read_cal_file(self):
-        # reads calibration hdf5
 
     def process_images(self):
         self.startTime = np.array([])
@@ -40,22 +37,17 @@ class ProcessImage:
         self.ccdTemp = np.array([])
         self.rawList = self.inputList
         self.imageArrays = []
-        self.process_general_information(self.rawList[0])
+        self.get_time_independent_information(self.rawList[0])
         for file in self.rawList:
-            # pass file handle
             with h5py.File(file, 'r') as hdf5_file:
-                self.process_specific_information(hdf5_file)
+                self.get_time_dependent_information(hdf5_file)
                 picture = MANGOimagehdf5.MANGOimage(hdf5_file, self.config, self.imageArrays)
-            # picture.process(self.newI, self.newJ)
                 self.imageArrays.append(picture.imageArray)
         self.imageArrays = np.array(self.imageArrays)
 
-        #self.imageArrays = np.array(self.imageDict.values(), dtype=np.ndarray)
 
-# potentially combine these two functions?
-# depends on overhead of opening single hdf5 file multiple times
-    def process_general_information(self, file):
-        # with construct here as well
+
+    def get_time_independent_information(self, file):
         with h5py.File(file, 'r') as hdf5_file:
             data = hdf5_file['image']
             self.code = data.attrs['station']
@@ -64,10 +56,11 @@ class ProcessImage:
             self.bin_x = data.attrs['bin_x']
             self.bin_y = data.attrs['bin_y']
             self.label = data.attrs['label']
+            # get this from starttime rather than file name?
             data_split = re.findall(r'-(\d+)-', file)[0]
             self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
 
-    def process_specific_information(self, file):
+    def get_time_dependent_information(self, file):
         '''
         Obtains the following attributes:
         1. start_time
@@ -76,8 +69,6 @@ class ProcessImage:
         :param file: input hdf5 file
         :return: None
         '''
-        # Use with construct here?  Avoid leaving files opeen
-        # img = h5py.File(file, 'r')['image']
         img = file['image']
         self.startTime = np.append(self.startTime, img.attrs['start_time'])
         self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
