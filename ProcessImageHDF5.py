@@ -30,17 +30,24 @@ class ProcessImage:
         # self.directories = self.config['Data Locations']
         # is only one value needed from this config file?  Can probably do away with it
 
+    # def read_cal_file(self):
+        # reads calibration hdf5
+
     def process_images(self):
         self.startTime = np.array([])
         self.exposureTime = np.array([])
         self.ccdTemp = np.array([])
         self.rawList = self.inputList
-        self.imageArrays = np.array([])
+        self.imageArrays = []
         self.process_general_information(self.rawList[0])
         for file in self.rawList:
-            self.process_specific_information(file)
-            picture = MANGOimagehdf5.MANGOimage(file, self.config, self.imageArrays)
-            self.imageArrays = picture.allImagesArray
+            # pass file handle
+            with h5py.File(file, 'r') as hdf5_file:
+                self.process_specific_information(hdf5_file)
+                picture = MANGOimagehdf5.MANGOimage(hdf5_file, self.config, self.imageArrays)
+            # picture.process(self.newI, self.newJ)
+                self.imageArrays.append(picture.imageArray)
+        self.imageArrays = np.array(self.imageArrays)
 
         #self.imageArrays = np.array(self.imageDict.values(), dtype=np.ndarray)
 
@@ -48,16 +55,16 @@ class ProcessImage:
 # depends on overhead of opening single hdf5 file multiple times
     def process_general_information(self, file):
         # with construct here as well
-        hdf5_file = h5py.File(file, 'r')
-        data = hdf5_file['image']
-        self.code = data.attrs['station']
-        self.site_lat = data.attrs['latitude']
-        self.site_lon = data.attrs['longitude']
-        self.bin_x = data.attrs['bin_x']
-        self.bin_y = data.attrs['bin_y']
-        self.label = data.attrs['label']
-        data_split = re.findall(r'-(\d+)-', file)[0]
-        self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
+        with h5py.File(file, 'r') as hdf5_file:
+            data = hdf5_file['image']
+            self.code = data.attrs['station']
+            self.site_lat = data.attrs['latitude']
+            self.site_lon = data.attrs['longitude']
+            self.bin_x = data.attrs['bin_x']
+            self.bin_y = data.attrs['bin_y']
+            self.label = data.attrs['label']
+            data_split = re.findall(r'-(\d+)-', file)[0]
+            self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
 
     def process_specific_information(self, file):
         '''
@@ -69,7 +76,8 @@ class ProcessImage:
         :return: None
         '''
         # Use with construct here?  Avoid leaving files opeen
-        img = h5py.File(file, 'r')['image']
+        # img = h5py.File(file, 'r')['image']
+        img = file['image']
         self.startTime = np.append(self.startTime, img.attrs['start_time'])
         self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])

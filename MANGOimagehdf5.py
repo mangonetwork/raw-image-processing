@@ -37,6 +37,7 @@ from PIL import Image
 
 
 class MANGOimage:
+    # inheret Process Image class?
     def __init__(self, rawimg, config, collective_img_arr):
         # list_of_dirs = ['parent', 'rawData', 'rawSite', 'rawSiteFiles', 'rawImages', 'processedImages']
         self.rawImage = rawimg
@@ -49,19 +50,19 @@ class MANGOimage:
 
         # is this nessisary, or do we want to just let the original error appear
         # these statements create a clean interface, but sometimes obtuse what the actual problem is
-        try:
-            self.loadFITS()
-            self.load_files()
-            self.process()
-        except ValueError:
-            raise ValueError('Raw image file cannot be processed.')
+        # try:
+        self.loadFITS()
+        self.load_files()
+        self.process()
+        # except ValueError:
+        #     raise ValueError('Raw image file cannot be processed.')
 
     # rename function?
     # FITS are a very specific type of image file used by some (non-MANGO) cameras
     def loadFITS(self):
-        data = h5py.File(self.rawImage, 'r')
-        self.imageData = data['image']
-        self.imageArray = np.array(data['image'])
+        # data = h5py.File(self.rawImage, 'r')
+        self.imageData = self.rawImage['image']
+        self.imageArray = np.array(self.rawImage['image'])
         self.width = self.imageData.attrs['width']
         self.height = self.imageData.attrs['height']
         self.imageArray1D = self.imageArray.flatten()
@@ -79,7 +80,7 @@ class MANGOimage:
         # self.showImage()
         self.mercatorUnwrap(self.imageData)
         # self.showImage()
-        self.writePNG()
+        # self.writePNG()
         # self.showImage()
 
     # function for debugging?
@@ -279,11 +280,11 @@ class MANGOimage:
         self.writeMode = 'LA'
         self.imageArray = ID_array
 
-    def writePNG(self):
-        self.imageArray = [np.array(self.imageArray)]
-        if len(self.allImagesArray) == 0:
-            self.allImagesArray = self.imageArray
-        else:
-            # This stacking should probably happen in main processing image script
-            # MangoImage.py should only be aware of a single image file
-            self.allImagesArray = np.append(self.allImagesArray, self.imageArray, axis=0)
+    # def writePNG(self):
+    #     self.imageArray = [np.array(self.imageArray)]
+    #     if len(self.allImagesArray) == 0:
+    #         self.allImagesArray = self.imageArray
+    #     else:
+    #         # This stacking should probably happen in main processing image script
+    #         # MangoImage.py should only be aware of a single image file
+    #         self.allImagesArray = np.append(self.allImagesArray, self.imageArray, axis=0)
