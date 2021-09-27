@@ -34,15 +34,12 @@ from PIL import Image
 
 class MANGOimage:
     # inheret Process Image class?
-    def __init__(self, rawimg, config, collective_img_arr):
+    def __init__(self, rawimg, cal_params):
 
         self.rawImage = rawimg
-        self.config = config
-        self.cal_hdf = self.config['Data Locations']['cal_hdf']
-        self.contrast = int(config['Specifications']['contrast'])
+        self.cal_params = cal_params
 
         self.load_image()
-        self.load_caldata()
         self.process()
 
     def load_image(self):
@@ -50,13 +47,6 @@ class MANGOimage:
         self.width = self.rawImage['image'].attrs['width']
         self.height = self.rawImage['image'].attrs['height']
 
-    def load_caldata(self):
-        # load data from calibration array
-        with h5py.File(self.cal_hdf, 'r') as f:
-            self.newIMatrix = f['New I array'][:]
-            self.newJMatrix = f['New J array'][:]
-            self.backgroundCorrection = f['Background Correction Array'][:]
-            self.rotationAngle = f['Calibration Angle'][()]
 
     def process(self):
         self.equalizeHistogram()
@@ -77,6 +67,7 @@ class MANGOimage:
 
 
     def equalizeHistogram(self):
+        # This function contains some questionable hard-coded things?
         # Histogram Equalization to adjust contrast [1%-99%]
         imageArray1D = self.imageData.flatten()
         # config file
@@ -91,7 +82,7 @@ class MANGOimage:
         cdf = cdf[:9996]
 
         max_cdf = max(cdf)
-        contrast = self.contrast
+        contrast = self.cal_params['contrast']
         maxIndex = np.argmin(abs(cdf - contrast/100 * max_cdf))
         minIndex = np.argmin(abs(cdf - (100 - contrast)/100 * max_cdf))
         vmax = float(bins[maxIndex])
@@ -129,7 +120,7 @@ class MANGOimage:
 
     def calibrate(self):
         self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
-                                                            self.rotationAngle, order=3)).astype(float)
+                                                            self.cal_params['rotationAngle'], order=3)).astype(float)
 
 
     # What does this do??
@@ -144,11 +135,11 @@ class MANGOimage:
 
         for j in range(ID_array.shape[0]):
             for i in range(ID_array.shape[1]):
-                newI = self.newIMatrix[j][i]
-                newJ = self.newJMatrix[j][i]
+                newI = self.cal_params['newIMatrix'][j][i]
+                newJ = self.cal_params['newJMatrix'][j][i]
                 if not (np.isnan(newI)) and not (np.isnan(newJ)) and not \
-                        (np.isnan(self.backgroundCorrection[j, i])):
-                    ID_array[j, i] = ID_array[j, i] * self.backgroundCorrection[j, i]
+                        (np.isnan(self.cal_params['backgroundCorrection'][j, i])):
+                    ID_array[j, i] = ID_array[j, i] * self.cal_params['backgroundCorrection'][j, i]
                     finalImage[int(newJ), int(newI)] = ID_array[j, i]
 
         (iKnown, jKnown) = np.where(finalImage >= 0)

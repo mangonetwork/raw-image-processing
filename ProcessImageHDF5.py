@@ -18,18 +18,36 @@ warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 class ProcessImage:
 
     def __init__(self, configFile, inputList, outputFile):
-        self.configFile = configFile
         self.inputList = inputList
         self.outputFile = outputFile
-        self.read_config()
+
+        self.cal_params = {}
+
+        self.read_config(configFile)
+        self.read_cal_file()
         self.process_images()
-        self.read_lat_lon()
         self.write_to_hdf5()
 
-    def read_config(self):
+    def read_config(self, configFile):
         # read in config file
-        self.config = configparser.ConfigParser()
-        self.config.read(self.configFile)
+        config = configparser.ConfigParser()
+        config.read(configFile)
+
+        self.cal_file = config['Data Locations']['cal_hdf']
+        self.siteName = config['Specifications']['siteName']
+        self.cal_params['contrast'] = int(config['Specifications']['contrast'])
+
+    def read_cal_file(self):
+
+        with h5py.File(self.cal_file, 'r') as f:
+            self.cal_params['newIMatrix'] = f['New I array'][:]
+            self.cal_params['newJMatrix'] = f['New J array'][:]
+            self.cal_params['backgroundCorrection'] = f['Background Correction Array'][:]
+            self.cal_params['rotationAngle'] = f['Calibration Angle'][()]
+            self.latitude = f['Latitude'][:]
+            self.longitude = f['Longitude'][:]
+        self.longitude[self.longitude<0.] +=360.
+
 
     def process_images(self):
         self.startTime = np.array([])
@@ -41,7 +59,7 @@ class ProcessImage:
         for file in self.rawList:
             with h5py.File(file, 'r') as hdf5_file:
                 self.get_time_dependent_information(hdf5_file)
-                picture = MANGOimagehdf5.MANGOimage(hdf5_file, self.config, self.imageArrays)
+                picture = MANGOimagehdf5.MANGOimage(hdf5_file, self.cal_params)
                 self.imageArrays.append(picture.imageArray)
         self.imageArrays = np.array(self.imageArrays)
 
@@ -73,13 +91,6 @@ class ProcessImage:
         self.startTime = np.append(self.startTime, img.attrs['start_time'])
         self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])
-
-    def read_lat_lon(self):
-        # Read in Latitude and Longitude arrays
-        with h5py.File(self.config['Data Locations']['cal_hdf'], 'r') as f:
-            self.latitude = f['Latitude'][:]
-            self.longitude = f['Longitude'][:]
-        self.longitude[self.longitude<0.] +=360.
 
 
 
@@ -124,7 +135,7 @@ class ProcessImage:
             CCD.attrs['Description'] = 'Temperature of CCD'
             CCD.attrs['Unit'] = 'degrees C'
 
-            N = f.create_dataset('SiteInfo/Name', data=self.config['Specifications']['siteName'])
+            N = f.create_dataset('SiteInfo/Name', data=self.siteName)
             N.attrs['Description'] = 'site name'
             C = f.create_dataset('SiteInfo/Code', data=self.code)
             C.attrs['Description'] = 'one letter site abbreviation/code'
