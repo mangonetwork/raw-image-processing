@@ -21,10 +21,10 @@ class ProcessImage:
         self.inputList = inputList
         self.outputFile = outputFile
 
-        self.cal_params = {}
+        self.calParams = {}
 
         self.read_config(configFile)
-        self.read_cal_file()
+        self.read_calfile()
         self.process_images()
         self.write_to_hdf5()
 
@@ -33,17 +33,17 @@ class ProcessImage:
         config = configparser.ConfigParser()
         config.read(configFile)
 
-        self.cal_file = config['Data Locations']['cal_hdf']
+        self.calFile = config['Data Locations']['cal_hdf']
         self.siteName = config['Specifications']['siteName']
-        self.cal_params['contrast'] = int(config['Specifications']['contrast'])
+        self.calParams['contrast'] = int(config['Specifications']['contrast'])
 
-    def read_cal_file(self):
+    def read_calfile(self):
 
-        with h5py.File(self.cal_file, 'r') as f:
-            self.cal_params['newIMatrix'] = f['New I array'][:]
-            self.cal_params['newJMatrix'] = f['New J array'][:]
-            self.cal_params['backgroundCorrection'] = f['Background Correction Array'][:]
-            self.cal_params['rotationAngle'] = f['Calibration Angle'][()]
+        with h5py.File(self.calFile, 'r') as f:
+            self.calParams['newIMatrix'] = f['New I array'][:]
+            self.calParams['newJMatrix'] = f['New J array'][:]
+            self.calParams['backgroundCorrection'] = f['Background Correction Array'][:]
+            self.calParams['rotationAngle'] = f['Calibration Angle'][()]
             self.latitude = f['Latitude'][:]
             self.longitude = f['Longitude'][:]
         self.longitude[self.longitude<0.] +=360.
@@ -58,9 +58,9 @@ class ProcessImage:
         self.get_time_independent_information(self.rawList[0])
         for file in self.rawList:
             with h5py.File(file, 'r') as hdf5_file:
-                self.get_time_dependent_information(hdf5_file)
-                picture = MANGOimagehdf5.MANGOimage(hdf5_file, self.cal_params)
-                self.imageArrays.append(picture.imageArray)
+                self.get_time_dependent_information(hdf5_file['image'])
+                picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
+                self.imageArrays.append(picture.process())
         self.imageArrays = np.array(self.imageArrays)
 
 
@@ -78,7 +78,9 @@ class ProcessImage:
             data_split = re.findall(r'-(\d+)-', file)[0]
             self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
 
-    def get_time_dependent_information(self, file):
+    # consider appending this in loop?
+    # Just a style preference
+    def get_time_dependent_information(self, img):
         '''
         Obtains the following attributes:
         1. start_time
@@ -87,7 +89,7 @@ class ProcessImage:
         :param file: input hdf5 file
         :return: None
         '''
-        img = file['image']
+
         self.startTime = np.append(self.startTime, img.attrs['start_time'])
         self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])

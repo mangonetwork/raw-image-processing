@@ -33,38 +33,32 @@ from PIL import Image
 
 
 class MANGOimage:
-    # inheret Process Image class?
-    def __init__(self, rawimg, cal_params):
+    def __init__(self, rawimg, calparams):
 
-        self.rawImage = rawimg
-        self.cal_params = cal_params
+        self.calParams = calparams
 
-        self.load_image()
-        self.process()
+        self.loadImage(rawimg)
+        # self.process()
 
-    def load_image(self):
-        self.imageData = self.rawImage['image'][:]
-        self.width = self.rawImage['image'].attrs['width']
-        self.height = self.rawImage['image'].attrs['height']
+    def loadImage(self, rawimg):
+        self.imageData = rawimg[:]
+        # these are only used in removeStars
+        self.width = rawimg.attrs['width']
+        self.height = rawimg.attrs['height']
 
 
     def process(self):
         self.equalizeHistogram()
         # self.showImage()
         # self.setLensFunction()
-        self.calibrate()
+        self.rotateImage()
         # self.showImage()
-        self.mercatorUnwrap(self.imageData)
+        self.mercatorUnwrap()
         # self.showImage()
         # self.writePNG()
         # self.showImage()
 
-    # function for debugging?
-    # fine to keep this, but make a note of it
-    def showImage(self):
-        img = Image.fromarray(self.imageData)
-        img.show()
-
+        return self.imageData
 
     def equalizeHistogram(self):
         # This function contains some questionable hard-coded things?
@@ -82,7 +76,7 @@ class MANGOimage:
         cdf = cdf[:9996]
 
         max_cdf = max(cdf)
-        contrast = self.cal_params['contrast']
+        contrast = self.calParams['contrast']
         maxIndex = np.argmin(abs(cdf - contrast/100 * max_cdf))
         minIndex = np.argmin(abs(cdf - (100 - contrast)/100 * max_cdf))
         vmax = float(bins[maxIndex])
@@ -118,15 +112,20 @@ class MANGOimage:
             griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='linear', fill_value=0), filteredData.shape)
 
 
-    def calibrate(self):
+    def rotateImage(self):
         self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
-                                                            self.cal_params['rotationAngle'], order=3)).astype(float)
+                                                            self.calParams['rotationAngle'], order=3)).astype(float)
 
 
     # What does this do??
-    # is the effetively where the Fish-Eye dewarping occurs?
+    # Effetively where the Fish-Eye dewarping occurs
+    # Certain points are mapped to new coordinates and then the rest of the array is filled in with interpolation
+    # There are probably better ways to do this ...
     # Should be able to add a NaN mask to just image array
-    def mercatorUnwrap(self, ID_array):
+    # imageData = data
+    # imageArray = data + masking array
+    def mercatorUnwrap(self):
+        ID_array = self.imageData
         newImageWidth = 500
         newImageHeight = 500
         finalImage = np.ones([newImageHeight, newImageWidth]) * -1
@@ -135,13 +134,15 @@ class MANGOimage:
 
         for j in range(ID_array.shape[0]):
             for i in range(ID_array.shape[1]):
-                newI = self.cal_params['newIMatrix'][j][i]
-                newJ = self.cal_params['newJMatrix'][j][i]
+                newI = self.calParams['newIMatrix'][j][i]
+                newJ = self.calParams['newJMatrix'][j][i]
                 if not (np.isnan(newI)) and not (np.isnan(newJ)) and not \
-                        (np.isnan(self.cal_params['backgroundCorrection'][j, i])):
-                    ID_array[j, i] = ID_array[j, i] * self.cal_params['backgroundCorrection'][j, i]
+                        (np.isnan(self.calParams['backgroundCorrection'][j, i])):
+                    ID_array[j, i] = ID_array[j, i] * self.calParams['backgroundCorrection'][j, i]
                     finalImage[int(newJ), int(newI)] = ID_array[j, i]
 
+
+        # most of this can probably be done with np.where(np.isfinite())
         (iKnown, jKnown) = np.where(finalImage >= 0)
         valuesKnown = np.extract(finalImage >= 0, finalImage)
         (iAll, jAll) = np.where(finalImage >= -1)
@@ -155,8 +156,22 @@ class MANGOimage:
                     # alphaMask[j, i] = 0
                     alphaMask[j, i] = np.nan  # to create transparent background
 
-        interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData))).astype('uint8')
-        alphaMask = alphaMask.astype('uint8')
-        ID_array = np.dstack([interpolatedData, alphaMask])
-        self.writeMode = 'LA'
-        self.imageArray = ID_array
+        # interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData))).astype('uint8')
+        # alphaMask = alphaMask.astype('uint8')
+        # ID_array = np.dstack([interpolatedData, alphaMask])
+        # self.writeMode = 'LA'
+        # self.imageArray = ID_array
+        interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData)))
+        interpolatedData[np.isnan(alphaMask)] = np.nan
+        # alphaMask = alphaMask.astype('uint8')
+        # ID_array = np.dstack([interpolatedData, alphaMask])
+        # self.writeMode = 'LA'
+        # self.imageArray = interpolatedData
+        self.imageData = interpolatedData.astype('float16')
+
+
+    # function for debugging?
+    # fine to keep this, but make a note of it
+    def showImage(self):
+        img = Image.fromarray(self.imageData.astype('uint8'))
+        img.show()
