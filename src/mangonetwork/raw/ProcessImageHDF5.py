@@ -1,7 +1,7 @@
 import warnings
 import configparser
 
-import MANGOimagehdf5
+from . import MANGOimagehdf5
 import argparse
 import re
 import pandas as pd
@@ -166,9 +166,13 @@ def parse_args():
     return args
 
 
-if __name__ == '__main__':
+def main():
     command_line_args = parse_args()
     conf = command_line_args.config
     inputs = command_line_args.inputs
     output = command_line_args.output
     ProcessImage(conf, inputs, output)
+
+if __name__ == '__main__':
+    main()
+
