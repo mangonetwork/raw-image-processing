@@ -149,12 +149,18 @@ class MANGOimage:
         interpolatedData = np.reshape(
             griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='cubic', fill_value=-1),
             [newImageWidth, newImageHeight])
-        alphaMask = np.ones([newImageHeight, newImageWidth]) * 255
-        for j in range(interpolatedData.shape[0]):
-            for i in range(interpolatedData.shape[1]):
-                if interpolatedData[j, i] == -1:
-                    # alphaMask[j, i] = 0
-                    alphaMask[j, i] = np.nan  # to create transparent background
+
+        # This only needs to be done once and is slow
+        # Move to outer ProcessImage class
+        self.alphaMask = np.ones([newImageHeight, newImageWidth]) * 255
+        self.alphaMask[interpolatedData == -1] = 0
+        self.alphaMask = self.alphaMask.astype('uint8')
+        # for j in range(interpolatedData.shape[0]):
+        #     for i in range(interpolatedData.shape[1]):
+        #         if interpolatedData[j, i] == -1:
+        #             # alphaMask[j, i] = 0
+        #             alphaMask[j, i] = np.nan  # to create transparent background
+
 
         # interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData))).astype('uint8')
         # alphaMask = alphaMask.astype('uint8')
@@ -162,12 +168,12 @@ class MANGOimage:
         # self.writeMode = 'LA'
         # self.imageArray = ID_array
         interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData)))
-        interpolatedData[np.isnan(alphaMask)] = np.nan
+        # interpolatedData[np.isnan(alphaMask)] = np.nan
         # alphaMask = alphaMask.astype('uint8')
         # ID_array = np.dstack([interpolatedData, alphaMask])
         # self.writeMode = 'LA'
         # self.imageArray = interpolatedData
-        self.imageData = interpolatedData.astype('float16')
+        self.imageData = interpolatedData.astype('uint8')
 
 
     # function for debugging?

@@ -62,6 +62,7 @@ class ProcessImage:
                 picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
                 self.imageArrays.append(picture.process())
         self.imageArrays = np.array(self.imageArrays)
+        self.imageMask = picture.alphaMask
 
 
 
@@ -132,6 +133,9 @@ class ProcessImage:
             I.attrs['Site Abbreviation'] = self.code
             I.attrs['Image label'] = self.label
             I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
+
+            M = f.create_dataset('Mask', data=self.imageMask, compression='gzip', compression_opts=1)
+            M.attrs['Description'] = 'image mask'
 
             CCD = f.create_dataset('CCDTemperature', data=self.ccdTemp)
             CCD.attrs['Description'] = 'Temperature of CCD'
