@@ -57,6 +57,7 @@ class ProcessImage:
         self.imageArrays = []
         self.get_time_independent_information(self.rawList[0])
         for file in self.rawList:
+            print(file)
             with h5py.File(file, 'r') as hdf5_file:
                 self.get_time_dependent_information(hdf5_file['image'])
                 picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
@@ -179,4 +180,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

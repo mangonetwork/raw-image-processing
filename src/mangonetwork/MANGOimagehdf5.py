@@ -22,6 +22,8 @@
 # Adding compatibility for BU software generated .153 files
 #######################################################################
 
+# DO WE WANT TO COMBINE THIS WITH ProcessRawImages.py?
+
 
 from scipy.interpolate import griddata
 
