@@ -1,7 +1,7 @@
 import warnings
 import configparser
 
-from . import MANGOimagehdf5
+from . import MANGOimage
 import argparse
 import re
 import pandas as pd
@@ -59,11 +59,24 @@ class ProcessImage:
         for file in self.rawList:
             print(file)
             with h5py.File(file, 'r') as hdf5_file:
+                imageData = hdf5_file['image'][:]
                 self.get_time_dependent_information(hdf5_file['image'])
-                picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
-                self.imageArrays.append(picture.process())
+                # picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
+
+            imageData = MANGOimage.equalizeHistogram(imageData, self.calParams['contrast'])
+            # self.showImage()
+            # self.setLensFunction()
+            imageData = MANGOimage.rotateImage(imageData, self.calParams['rotationAngle'])
+            # self.showImage()
+            imageData, alphaMask = MANGOimage.mercatorUnwrap(imageData, self.calParams['newIMatrix'], self.calParams['newJMatrix'], self.calParams['backgroundCorrection'])
+            # self.showImage()
+            # self.writePNG()
+            # self.showImage()
+
+            self.imageArrays.append(imageData)
+
         self.imageArrays = np.array(self.imageArrays)
-        self.imageMask = picture.alphaMask
+        self.imageMask = alphaMask
 
 
 
