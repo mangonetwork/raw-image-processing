@@ -23,13 +23,14 @@ class Calibrate:
         config.read(configFile)
 
         self.siteCalFilepath = config['MOCK']['SITE_CAL_FILEPATH']
-        self.rotationAngle = config['MOCK']['ROTATION_ANGLE']
+        # site calibration folders are all located in:
+        # ~/Sites/<site name>/calibration
+        self.rotationAngle = float(config['MOCK']['ROTATION_ANGLE'])
 
     def mock(self):
-        print('WARNING: THIS IS A MOCK ROUTINE. IT WILL RUN AND PRODUCE OUTPUT THAT IS FUNCITONAL, BUT MAY NOT BE CORRECT.')
+        print('WARNING: THIS IS A MOCK ROUTINE.  Instead of calculating new calibration parameters, it converts the old calibration files to the new format and assigns a pre-designated rotation angle.')
 
         f = h5py.File(self.outputFile, 'w')
-        # sitepath = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration"
         newIFilename = os.path.join(self.siteCalFilepath, 'newI.csv')
         nifarray = np.array(pd.read_csv(newIFilename, header=None))
 
@@ -39,15 +40,12 @@ class Calibrate:
         backgroundCorrectionFilename = os.path.join(self.siteCalFilepath, 'backgroundCorrection.csv')
         bcfarray = np.array(pd.read_csv(backgroundCorrectionFilename, header=None))
 
-        # calibrationFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Calibration.csv"
         calibrationFile = os.path.join(self.siteCalFilepath, 'Calibration.csv')
         calarray = np.array(pd.read_csv(calibrationFile, header=None))
 
-        # latitudeFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Latitudes.csv"
         latitudeFile = os.path.join(self.siteCalFilepath, 'Latitudes.csv')
         latarray = np.array(pd.read_csv(latitudeFile, header=None))
 
-        # longitudeFile = "C:\\Users\\padma\\MANGO SU21\\raw_data\\CFS\\site_files\\calibration\\Longitudes.csv"
         longitudeFile = os.path.join(self.siteCalFilepath, 'Longitudes.csv')
         lonarray = np.array(pd.read_csv(longitudeFile, header=None))
 
@@ -73,7 +71,7 @@ class Calibrate:
         backgroundCorrection = f.create_dataset('Background Correction Array', data=bcfarray, compression='gzip', compression_opts=1)
         backgroundCorrection.attrs['Description'] = 'Background correction array used for masking in mercator unwrapping function in MANGOimage.py'
 
-        calibration = f.create_dataset('Calibration Angle', data=[10], compression='gzip', compression_opts=1)
+        calibration = f.create_dataset('Calibration Angle', data=[self.rotationAngle], compression='gzip', compression_opts=1)
         calibration.attrs['Unit'] = 'degrees (to rotate anticlockwise)'
         f.close()
 
