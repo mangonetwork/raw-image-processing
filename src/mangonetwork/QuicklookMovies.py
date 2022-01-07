@@ -6,7 +6,7 @@ import configparser
 
 import matplotlib.pyplot as plt
 
-from . import MANGOimage
+from .MANGOImage import MANGOImage
 import argparse
 import pathlib
 import re
@@ -51,8 +51,10 @@ class QuickLook:
         for file in self.rawList:
             self.process_specific_information(file)
             # self.processSingleImage()
-            self.imageArray = MANGOimage.equalizeHistogram(self.imageArray, self.contrast)
-            self.imageArray = MANGOimage.rotateImage(self.imageArray, self.rotationAngle)
+            image = MANGOImage(self.imageArray)
+            image.equalizeHistogram(self.contrast)
+            image.rotateImage(self.rotationAngle)
+            self.imageArray = image.imageData
             self.plot()
         self.imageWriter.close()
 
