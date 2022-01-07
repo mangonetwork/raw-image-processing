@@ -33,9 +33,9 @@ class ProcessImage:
         config = configparser.ConfigParser()
         config.read(configFile)
 
-        self.calFile = config['Data Locations']['cal_hdf']
-        self.siteName = config['Specifications']['siteName']
-        self.calParams['contrast'] = int(config['Specifications']['contrast'])
+        self.siteName = config.get('DEFAULT','SITE_NAME')
+        self.calFile = config.get('DEFAULT','CALIBRATION_FILE')
+        self.calParams['contrast'] = config.getint('DEFAULT','CONTRAST')
 
     def read_calfile(self):
 

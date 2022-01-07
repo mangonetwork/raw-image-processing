@@ -34,10 +34,15 @@ class QuickLook:
         config = configparser.ConfigParser()
         config.read(self.configFile)
 
-        self.contrast = int(config['Specifications']['contrast'])
-        self.calFile = config['Data Locations']['cal_hdf']
-        with h5py.File(self.calFile, 'r') as f:
-            self.rotationAngle = f['Calibration Angle'][()]
+        self.siteName = config.get('DEFAULT','SITE_NAME')
+        self.contrast = config.getint('DEFAULT','CONTRAST')
+        if config.has_option('DEFAULT','ROTATION_ANGLE'):
+            self.rotationAngle = config.getfloat('DEFAULT','ROTATION_ANGLE')
+        else:
+            calFile = config.get('DEFAULT','CALIBRATION_FILE')
+            with h5py.File(calFile, 'r') as f:
+                self.rotationAngle = f['Calibration Angle'][()]
+
 
 
     def process_images(self):
@@ -49,6 +54,7 @@ class QuickLook:
         self.process_general_information(self.rawList[0])
         self.imageWriter = hcipy.plotting.FFMpegWriter(self.outputFile, framerate = 10)
         for file in self.rawList:
+            print(file)
             self.process_specific_information(file)
             # self.processSingleImage()
             image = MANGOImage(self.imageArray)
