@@ -81,7 +81,9 @@ class QuickLook:
 
         # plt.annotate(filtstring, xy=(800, 690), color='white', xycoords='figure pixels')
         # plt.annotate(expstring, xy=(800, 660), color='white', xycoords='figure pixels')
-        ax.annotate(self.code.upper(), xy=(500,470), color='white')
+        # ax.annotate(self.code.upper(), xy=(500,470), color='white')
+        ax.annotate('{}: {}'.format(self.code.upper(),self.siteName), xy=(20,470), color='white')
+        ax.annotate('NSF/SRI MANGO DASI', xy=(460,495), color='white')
         plt.axis('off')
 
         self.imageWriter.add_frame(fig)
