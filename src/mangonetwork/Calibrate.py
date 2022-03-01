@@ -9,71 +9,215 @@ import configparser
 
 class Calibrate:
 
-    def __init__(self, configFile, outputFile):
-        self.outputFile = outputFile
+    def __init__(self, configFile):
 
         self.calParams = {}
 
         self.read_config(configFile)
-        self.mock()
+
+        self.star_data = np.loadtxt(self.starCalFile, usecols=(1,2,3,4))
+
+        self.find_calibration_params()
+        self.transformed_data_grid()
+        self.atmospheric_corrections()
+        self.create_calibration_file()
+
 
     def read_config(self, configFile):
         # read in config file
         config = configparser.ConfigParser()
         config.read(configFile)
 
-        self.siteCalFilepath = config['MOCK']['SITE_CAL_FILEPATH']
+        # self.siteCalFilepath = config['MOCK']['SITE_CAL_FILEPATH']
         # site calibration folders are all located in:
         # ~/Sites/<site name>/calibration
-        self.rotationAngle = float(config['MOCK']['ROTATION_ANGLE'])
+        # self.rotationAngle = float(config['MOCK']['ROTATION_ANGLE'])
+        self.outputFile = config.get('CALIBRATION','CALIBRATION_FILE')
+        self.starCalFile = config.get('CALIBRATION', 'STAR_CAL_FILE')
+        self.altitude = config.getfloat('CALIBRATION', 'ALTITUDE')
+        self.Imax = config.getint('CALIBRATION','IMAX')
+        self.Jmax = config.getint('CALIBRATION','JMAX')
 
-    def mock(self):
-        print('WARNING: THIS IS A MOCK ROUTINE.  Instead of calculating new calibration parameters, it converts the old calibration files to the new format and assigns a pre-designated rotation angle.')
+    def normalize_pixel_coords(self, i, j):
+        RL = self.Jmax/2.
+        x = (self.Imax/2.-i)/RL
+        y = (self.Jmax/2.-j)/RL
+        return x, y
 
-        f = h5py.File(self.outputFile, 'w')
-        newIFilename = os.path.join(self.siteCalFilepath, 'newI.csv')
-        nifarray = np.array(pd.read_csv(newIFilename, header=None))
+    def find_calibration_params(self):
 
-        newJFilename = os.path.join(self.siteCalFilepath, 'newJ.csv')
-        njfarray = np.array(pd.read_csv(newJFilename, header=None))
-
-        backgroundCorrectionFilename = os.path.join(self.siteCalFilepath, 'backgroundCorrection.csv')
-        bcfarray = np.array(pd.read_csv(backgroundCorrectionFilename, header=None))
-
-        calibrationFile = os.path.join(self.siteCalFilepath, 'Calibration.csv')
-        calarray = np.array(pd.read_csv(calibrationFile, header=None))
-
-        latitudeFile = os.path.join(self.siteCalFilepath, 'Latitudes.csv')
-        latarray = np.array(pd.read_csv(latitudeFile, header=None))
-
-        longitudeFile = os.path.join(self.siteCalFilepath, 'Longitudes.csv')
-        lonarray = np.array(pd.read_csv(longitudeFile, header=None))
-
-        Lat = f.create_dataset('Latitude', data=latarray, compression='gzip', compression_opts=1)
-        Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
-        Lat.attrs['Size'] = 'Ipixels x Jpixels'
-        Lat.attrs['Projection Altitude'] = 250
-        Lat.attrs['Unit'] = 'degrees'
+        star_el = self.star_data[:,0]*np.pi/180.
+        star_az = self.star_data[:,1]*np.pi/180.
+        i = self.star_data[:,2]
+        j = self.star_data[:,3]
+        x, y = self.normalize_pixel_coords(i, j)
+        xp = np.cos(star_el)*np.sin(star_az)
+        yp = np.cos(star_el)*np.cos(star_az)
 
 
-        Lon = f.create_dataset('Longitude', data=lonarray, compression='gzip', compression_opts=1)
-        Lon.attrs['Description'] = 'geodetic longitude of each pixel projected to 250 km'
-        Lon.attrs['Size'] = 'Ipixels x Jpixels'
-        Lon.attrs['Projection Altitude'] = 250
-        Lon.attrs['Unit'] = 'degrees'
+        from scipy.optimize import least_squares
 
-        newI = f.create_dataset('New I array', data=nifarray, compression='gzip', compression_opts=1)
-        newI.attrs['Description'] = 'New I array used for masking in mercator unwrapping function in MANGOimage.py'
+        init_params = self.initial_params(x, y, xp, yp)
+        params = least_squares(self.residuals, init_params, args=(x, y, xp, yp))
+        self.x0, self.y0, self.theta, self.A, self.B, self.C, self.D = params.x
 
-        newJ = f.create_dataset('New J array', data=njfarray, compression='gzip', compression_opts=1)
-        newJ.attrs['Description'] = 'New J array used for masking in mercator unwrapping function in MANGOimage.py'
 
-        backgroundCorrection = f.create_dataset('Background Correction Array', data=bcfarray, compression='gzip', compression_opts=1)
-        backgroundCorrection.attrs['Description'] = 'Background correction array used for masking in mercator unwrapping function in MANGOimage.py'
+    def transform(self, x, y, x0, y0, theta, A, B, C, D):
+        x1 = x - x0
+        y1 = y - y0
 
-        calibration = f.create_dataset('Calibration Angle', data=[self.rotationAngle], compression='gzip', compression_opts=1)
-        calibration.attrs['Unit'] = 'degrees (to rotate anticlockwise)'
-        f.close()
+        t = theta*np.pi/180.
+        x2 = np.cos(t)*x1 - np.sin(t)*y1
+        y2 = np.sin(t)*x1 + np.cos(t)*y1
+
+        r = np.sqrt(x2**2+y2**2)
+        lam = A + B*r + C*r**2 + D*r**3
+        x3 = np.cos(lam)*x2/r
+        y3 = np.cos(lam)*y2/r
+
+        return x3, y3
+
+    def residuals(self, params, x, y, xp, yp):
+        x0, y0, theta, A, B, C, D = params
+        xt, yt = self.transform(x, y, x0, y0, theta, A, B, C, D)
+        res = np.sqrt((xp-xt)**2 + (yp-yt)**2)
+        return res
+
+    def initial_params(self, x, y, xp, yp):
+        from scipy.spatial.transform import Rotation
+
+        # Get these from config file?
+        # TBH, unless a camera is oriented REALLY wierdly, these initial parameters should be fine
+        x0, y0 = [0., 0.]
+        A, B, C, D = [np.pi/2, -np.pi/2, 0., 0.]
+
+        # calculate transformation with initial tranlation and lens function params but no rotation
+        xu, yu = self.transform(x, y, x0, y0, 0., A, B, C, D)
+
+        # Find rotation matrix such that the vectors to the star locations roughly match
+        Pu = np.array([xu, yu, np.zeros(len(x))]).T
+        Pp = np.array([xp, yp, np.zeros(len(x))]).T
+        R, _ = Rotation.align_vectors(Pp, Pu)
+        # Find euler angles of rotation matrix and select "z" rotation as an approximate theta
+        theta = R.as_euler('xyz', degrees=True)[2]
+
+        return [x0, y0, theta, A, B, C, D]
+
+
+    def transformed_data_grid(self):
+
+        # Create a grid and find the transformed coordinates of each grid point
+        i_grid, j_grid = np.meshgrid(np.arange(self.Imax),np.arange(self.Jmax))
+        x_grid, y_grid = self.normalize_pixel_coords(i_grid, j_grid)
+        self.xt_grid, self.yt_grid = self.transform(x_grid, y_grid, self.x0, self.y0, self.theta, self.A, self.B, self.C, self.D)
+
+        # Find elevation angle of each point on the grid
+        r = np.sqrt((x_grid-self.x0)**2 + (y_grid-self.y0)**2)
+        self.lam_grid = (self.A + self.B*r + self.C*r**2 + self.D*r**3)
+        # Use elevation angle grid to create mask in all locations below the horizon
+        self.mask = np.zeros((self.Jmax, self.Imax), dtype=bool)
+        self.mask[self.lam_grid<0.] = True
+
+        self.xt_grid[self.mask] = np.nan
+        self.yt_grid[self.mask] = np.nan
+
+
+    def atmospheric_corrections(self):
+        # Atmospheric corrections are taken from Kubota et al., 2001
+        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
+        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
+        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
+
+        RE = 6371.0  # kilometers
+        ha = self.altitude  # kilometers
+        za = np.pi/2-self.lam_grid
+
+        # Kubota et al., 2001; eqn. 6
+        vanRhijnFactor = np.sqrt(1.0 - np.sin(za)**2*(RE/(RE+ha))**2)
+
+        # Kubota et al., 2001; eqn. 7,8
+        a = 0.2
+        F = 1. / (np.cos(za) + 0.15 * (93.885 - za*180./np.pi) ** (-1.253))
+        extinctionFactor = 10.0 ** (0.4 * a * F)
+
+        self.atmosphericCorrection = vanRhijnFactor * extinctionFactor
+        self.atmosphericCorrection[self.mask] = np.nan
+
+
+
+    def create_calibration_file(self):
+
+        with h5py.File(self.outputFile, 'w') as f:
+
+            newI = f.create_dataset('transformed_coords', data=np.array([self.xt_grid, self.yt_grid]), compression='gzip', compression_opts=1)
+            newI.attrs['Description'] = 'Transformed x, y coordinates of each point in the image grid'
+
+            backgroundCorrection = f.create_dataset('atmos_corr', data=self.atmosphericCorrection, compression='gzip', compression_opts=1)
+            backgroundCorrection.attrs['Description'] = 'Background atmospheric correction factors to apply to the image pre-regridding'
+
+            mask = f.create_dataset('mask', data=self.mask, compression='gzip', compression_opts=1)
+            backgroundCorrection.attrs['Description'] = 'Mask of portion of array that does not include the ASI FoV'
+
+            # transformation/calibration parameters
+            lensfun = f.create_dataset('lens_function', data=np.array([self.A, self.B, self.C, self.D]))
+            lensfun.attrs['Description'] = 'Lens function coefficients of the form [A,B,C,D] (A+Br+Cr^2+Dr^3)'
+
+            trans = f.create_dataset('translation', data=np.array([self.x0, self.y0]))
+            trans.attrs['Description'] = 'Linear translation [x0, y0]'
+
+            rotate = f.create_dataset('rotation_angle', data=self.theta)
+            rotate.attrs['Description'] = 'Rotation angle'
+
+            alt = f.create_dataset('altitude', data=self.altitude)
+            alt.attrs['Description'] = 'Assumed airglow altituded used for atmospheric correction (km)'
+
+    # def mock(self):
+    #     print('WARNING: THIS IS A MOCK ROUTINE.  Instead of calculating new calibration parameters, it converts the old calibration files to the new format and assigns a pre-designated rotation angle.')
+    #
+    #     f = h5py.File(self.outputFile, 'w')
+    #     newIFilename = os.path.join(self.siteCalFilepath, 'newI.csv')
+    #     nifarray = np.array(pd.read_csv(newIFilename, header=None))
+    #
+    #     newJFilename = os.path.join(self.siteCalFilepath, 'newJ.csv')
+    #     njfarray = np.array(pd.read_csv(newJFilename, header=None))
+    #
+    #     backgroundCorrectionFilename = os.path.join(self.siteCalFilepath, 'backgroundCorrection.csv')
+    #     bcfarray = np.array(pd.read_csv(backgroundCorrectionFilename, header=None))
+    #
+    #     calibrationFile = os.path.join(self.siteCalFilepath, 'Calibration.csv')
+    #     calarray = np.array(pd.read_csv(calibrationFile, header=None))
+    #
+    #     latitudeFile = os.path.join(self.siteCalFilepath, 'Latitudes.csv')
+    #     latarray = np.array(pd.read_csv(latitudeFile, header=None))
+    #
+    #     longitudeFile = os.path.join(self.siteCalFilepath, 'Longitudes.csv')
+    #     lonarray = np.array(pd.read_csv(longitudeFile, header=None))
+    #
+    #     Lat = f.create_dataset('Latitude', data=latarray, compression='gzip', compression_opts=1)
+    #     Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
+    #     Lat.attrs['Size'] = 'Ipixels x Jpixels'
+    #     Lat.attrs['Projection Altitude'] = 250
+    #     Lat.attrs['Unit'] = 'degrees'
+    #
+    #
+    #     Lon = f.create_dataset('Longitude', data=lonarray, compression='gzip', compression_opts=1)
+    #     Lon.attrs['Description'] = 'geodetic longitude of each pixel projected to 250 km'
+    #     Lon.attrs['Size'] = 'Ipixels x Jpixels'
+    #     Lon.attrs['Projection Altitude'] = 250
+    #     Lon.attrs['Unit'] = 'degrees'
+    #
+    #     newI = f.create_dataset('New I array', data=nifarray, compression='gzip', compression_opts=1)
+    #     newI.attrs['Description'] = 'New I array used for masking in mercator unwrapping function in MANGOimage.py'
+    #
+    #     newJ = f.create_dataset('New J array', data=njfarray, compression='gzip', compression_opts=1)
+    #     newJ.attrs['Description'] = 'New J array used for masking in mercator unwrapping function in MANGOimage.py'
+    #
+    #     backgroundCorrection = f.create_dataset('Background Correction Array', data=bcfarray, compression='gzip', compression_opts=1)
+    #     backgroundCorrection.attrs['Description'] = 'Background correction array used for masking in mercator unwrapping function in MANGOimage.py'
+    #
+    #     calibration = f.create_dataset('Calibration Angle', data=[self.rotationAngle], compression='gzip', compression_opts=1)
+    #     calibration.attrs['Unit'] = 'degrees (to rotate anticlockwise)'
+    #     f.close()
 
 
 def parse_args():
@@ -87,8 +231,6 @@ def parse_args():
                                                  'to process MANGOImage.')
     parser.add_argument('-c', '--config', dest='config', type=str,
                         help='Config file containing data locations and image specs.')
-    parser.add_argument('-o', '--output', dest='output', type=str,
-                        help='Output file to write processed images to.')
     args = parser.parse_args()
 
     return args
@@ -97,8 +239,7 @@ def parse_args():
 def main():
     command_line_args = parse_args()
     conf = command_line_args.config
-    output = command_line_args.output
-    Calibrate(conf, output)
+    Calibrate(conf)
 
 
 if __name__ == '__main__':

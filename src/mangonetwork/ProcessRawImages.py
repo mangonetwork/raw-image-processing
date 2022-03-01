@@ -5,6 +5,7 @@ from .MANGOImage import MANGOImage
 import argparse
 import re
 import pandas as pd
+import pymap3d as pm
 import datetime as dt
 import numpy as np
 import h5py
@@ -33,20 +34,30 @@ class ProcessImage:
         config = configparser.ConfigParser()
         config.read(configFile)
 
-        self.siteName = config.get('DEFAULT','SITE_NAME')
-        self.calFile = config.get('DEFAULT','CALIBRATION_FILE')
-        self.calParams['contrast'] = config.getint('DEFAULT','CONTRAST')
+        self.siteName = config.get('PROCESSING','SITE_NAME')
+        self.calFile = config.get('CALIBRATION','CALIBRATION_FILE')
+        self.calParams['contrast'] = config.getint('PROCESSING','CONTRAST')
+        # specify in config file
+        self.newImax = config.getint('PROCESSING','NEWIMAX')
+        self.newJmax = config.getint('PROCESSING','NEWJMAX')
+        # read from calibration file?
+        # self.targAlt = config.getfloat('PROCESSING','IMAGEALTITUDE')
+
 
     def read_calfile(self):
 
         with h5py.File(self.calFile, 'r') as f:
-            self.calParams['newIMatrix'] = f['New I array'][:]
-            self.calParams['newJMatrix'] = f['New J array'][:]
-            self.calParams['backgroundCorrection'] = f['Background Correction Array'][:]
-            self.calParams['rotationAngle'] = f['Calibration Angle'][()]
-            self.latitude = f['Latitude'][:]
-            self.longitude = f['Longitude'][:]
-        self.longitude[self.longitude<0.] +=360.
+            self.calParams['transformedCoords'] = f['transformed_coords'][:]
+            self.calParams['atmosphericCorrection'] = f['atmos_corr'][:]
+            self.calParams['mask'] = f['mask'][:]
+            self.targAlt = f['altitude'][()]
+            # self.calParams['newIMatrix'] = f['New I array'][:]
+            # self.calParams['newJMatrix'] = f['New J array'][:]
+            # self.calParams['backgroundCorrection'] = f['Background Correction Array'][:]
+            # self.calParams['rotationAngle'] = f['Calibration Angle'][()]
+            # self.latitude = f['Latitude'][:]
+            # self.longitude = f['Longitude'][:]
+        # self.longitude[self.longitude<0.] +=360.
 
 
     def process_images(self):
@@ -56,6 +67,7 @@ class ProcessImage:
         self.rawList = self.inputList
         self.imageArrays = []
         self.get_time_independent_information(self.rawList[0])
+        self.create_position_arrays()
         for file in self.rawList:
             print(file)
             with h5py.File(file, 'r') as hdf5_file:
@@ -67,9 +79,10 @@ class ProcessImage:
             image.equalizeHistogram(self.calParams['contrast'])
             # self.showImage()
             # self.setLensFunction()
-            image.rotateImage(self.calParams['rotationAngle'])
+            # image.rotateImage(self.calParams['rotationAngle'])
             # self.showImage()
-            image.mercatorUnwrap(self.calParams['newIMatrix'], self.calParams['newJMatrix'], self.calParams['backgroundCorrection'])
+            # image.mercatorUnwrap(self.calParams['newIMatrix'], self.calParams['newJMatrix'], self.calParams['backgroundCorrection'])
+            image.transformImage(self.calParams['transformedCoords'], self.calParams['atmosphericCorrection'], self.calParams['mask'], newImgShape=(self.newImax,self.newJmax))
             # self.showImage()
             # self.writePNG()
             # self.showImage()
@@ -77,8 +90,9 @@ class ProcessImage:
             self.imageArrays.append(image.imageData)
 
         self.imageArrays = np.array(self.imageArrays)
-        self.imageMask = image.alphaMask
-
+        # self.imageArrays[:,self.imageMask] = 0
+        # self.imageMask = image.alphaMask
+        # self.imageMask = self.calParams['mask']
 
 
     def get_time_independent_information(self, file):
@@ -111,6 +125,37 @@ class ProcessImage:
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])
 
 
+    def create_position_arrays(self):
+
+        i_grid, j_grid = np.meshgrid(np.arange(self.newImax),np.arange(self.newJmax))
+        RL = self.newJmax/2.
+        x_grid = (self.newImax/2.-i_grid)/RL
+        y_grid = (self.newJmax/2.-j_grid)/RL
+        r2_grid = x_grid**2 + y_grid**2
+        z_grid = np.sqrt(1. - r2_grid)
+        self.imageMask = np.isnan(z_grid)
+        x_grid[self.imageMask] = np.nan
+        y_grid[self.imageMask] = np.nan
+
+        self.azimuth = np.arctan2(x_grid, y_grid)*180./np.pi
+        self.elevation = np.arccos(np.sqrt(x_grid**2 + y_grid**2))*180./np.pi
+
+        x, y, z = pm.geodetic2ecef(self.site_lat, self.site_lon, 0.)
+        vx, vy, vz = pm.enu2uvw(x_grid, y_grid, z_grid, self.site_lat, self.site_lon)
+
+        earth = pm.Ellipsoid()
+        a2 = (earth.semimajor_axis + self.targAlt*1000.)**2
+        b2 = (earth.semimajor_axis + self.targAlt*1000.)**2
+        c2 = (earth.semiminor_axis + self.targAlt*1000.)**2
+
+        A = vx**2/a2 + vy**2/b2 + vz**2/c2
+        B = x*vx/a2 + y*vy/b2 + z*vz/c2
+        C = x**2/a2 + y**2/b2 + z**2/c2 -1
+
+        alpha = (np.sqrt(B**2-A*C)-B)/A
+
+        self.latitude, self.longitude, alt = pm.ecef2geodetic(x + alpha*vx, y + alpha*vy, z + alpha*vz)
+
 
     def write_to_hdf5(self):
 
@@ -132,15 +177,25 @@ class ProcessImage:
             # this is associated with the locations of the latitude, so that would make sense
             # Consider just copying array with attached attributes from calibration file?
             Lat = f.create_dataset('Latitude', data=self.latitude, compression='gzip', compression_opts=1)
-            Lat.attrs['Description'] = 'geodetic latitude of each pixel projected to 250 km'
+            Lat.attrs['Description'] = 'geodetic latitude of each pixel'
             Lat.attrs['Size'] = 'Ipixels x Jpixels'
-            Lat.attrs['Projection Altitude'] = 250
+            Lat.attrs['Projection Altitude'] = self.targAlt
             Lat.attrs['Unit'] = 'degrees'
 
             Lon = f.create_dataset('Longitude', data=self.longitude, compression='gzip', compression_opts=1)
-            Lon.attrs['Description'] = 'geodetic longitude of each pixel projected to 250 km'
+            Lon.attrs['Description'] = 'geodetic longitude of each pixel'
             Lon.attrs['Size'] = 'Ipixels x Jpixels'
-            Lon.attrs['Projection Altitude'] = 250
+            Lon.attrs['Projection Altitude'] = self.targAlt
+            Lon.attrs['Unit'] = 'degrees'
+
+            Lat = f.create_dataset('Azimuth', data=self.azimuth, compression='gzip', compression_opts=1)
+            Lat.attrs['Description'] = 'azimuth of each pixel'
+            Lat.attrs['Size'] = 'Ipixels x Jpixels'
+            Lat.attrs['Unit'] = 'degrees'
+
+            Lon = f.create_dataset('Elevation', data=self.elevation, compression='gzip', compression_opts=1)
+            Lon.attrs['Description'] = 'elevation of each pixel'
+            Lon.attrs['Size'] = 'Ipixels x Jpixels'
             Lon.attrs['Unit'] = 'degrees'
 
             I = f.create_dataset('ImageData', data=self.imageArrays, compression='gzip', compression_opts=1)
