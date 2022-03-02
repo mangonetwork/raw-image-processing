@@ -40,6 +40,7 @@ class ProcessImage:
         # specify in config file
         self.newImax = config.getint('PROCESSING','NEWIMAX')
         self.newJmax = config.getint('PROCESSING','NEWJMAX')
+        self.elevCutoff = config.getfloat('PROCESSING','ELEVCUTOFF')
         # read from calibration file?
         # self.targAlt = config.getfloat('PROCESSING','IMAGEALTITUDE')
 
@@ -83,6 +84,7 @@ class ProcessImage:
             # self.showImage()
             # image.mercatorUnwrap(self.calParams['newIMatrix'], self.calParams['newJMatrix'], self.calParams['backgroundCorrection'])
             image.transformImage(self.calParams['transformedCoords'], self.calParams['atmosphericCorrection'], self.calParams['mask'], newImgShape=(self.newImax,self.newJmax))
+            image.applyMask(self.imageMask)
             # self.showImage()
             # self.writePNG()
             # self.showImage()
@@ -90,9 +92,6 @@ class ProcessImage:
             self.imageArrays.append(image.imageData)
 
         self.imageArrays = np.array(self.imageArrays)
-        # self.imageArrays[:,self.imageMask] = 0
-        # self.imageMask = image.alphaMask
-        # self.imageMask = self.calParams['mask']
 
 
     def get_time_independent_information(self, file):
@@ -133,9 +132,13 @@ class ProcessImage:
         y_grid = (self.newJmax/2.-j_grid)/RL
         r2_grid = x_grid**2 + y_grid**2
         z_grid = np.sqrt(1. - r2_grid)
-        self.imageMask = np.isnan(z_grid)
+
+        # Set mask based on elevation angle limit
+        r_cutoff = np.cos(self.elevCutoff*np.pi/180.)
+        self.imageMask = r2_grid > r_cutoff**2
         x_grid[self.imageMask] = np.nan
         y_grid[self.imageMask] = np.nan
+        z_grid[self.imageMask] = np.nan
 
         self.azimuth = np.arctan2(x_grid, y_grid)*180./np.pi
         self.elevation = np.arccos(np.sqrt(x_grid**2 + y_grid**2))*180./np.pi
