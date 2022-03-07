@@ -17,10 +17,11 @@ class Calibrate:
 
         self.star_data = np.loadtxt(self.starCalFile, usecols=(1,2,3,4))
 
+        self.RE = 6371.0
+
         self.find_calibration_params()
-        self.transformed_data_grid()
-        self.atmospheric_corrections()
-        self.create_calibration_file()
+        self.create_calibration_arrays()
+        self.save_calibration_file()
 
 
     def read_config(self, configFile):
@@ -34,9 +35,14 @@ class Calibrate:
         # self.rotationAngle = float(config['MOCK']['ROTATION_ANGLE'])
         self.outputFile = config.get('CALIBRATION','CALIBRATION_FILE')
         self.starCalFile = config.get('CALIBRATION', 'STAR_CAL_FILE')
-        self.altitude = config.getfloat('CALIBRATION', 'ALTITUDE')
+        self.ha = config.getfloat('CALIBRATION', 'ALTITUDE')
+        self.elevCutoff = config.getfloat('CALIBRATION', 'ELEV_CUTOFF')
         self.Imax = config.getint('CALIBRATION','IMAX')
         self.Jmax = config.getint('CALIBRATION','JMAX')
+        # self.newImax = config.getint('CALIBRATION','NEWIMAX')
+        # self.newJmax = config.getint('CALIBRATION','NEWJMAX')
+        # self.siteLat = config.getfloat('CALIBRATION','SITELAT')
+        # self.siteLon = config.getfloat('CALIBRATION','SITELON')
 
     def normalize_pixel_coords(self, i, j):
         RL = self.Jmax/2.
@@ -60,9 +66,10 @@ class Calibrate:
         init_params = self.initial_params(x, y, xp, yp)
         params = least_squares(self.residuals, init_params, args=(x, y, xp, yp))
         self.x0, self.y0, self.theta, self.A, self.B, self.C, self.D = params.x
+        print(self.theta)
 
 
-    def transform(self, x, y, x0, y0, theta, A, B, C, D):
+    def transform(self, x, y, x0, y0, theta, A, B, C, D, unwarp=True, return_elev=False):
         x1 = x - x0
         y1 = y - y0
 
@@ -72,14 +79,26 @@ class Calibrate:
 
         r = np.sqrt(x2**2+y2**2)
         lam = A + B*r + C*r**2 + D*r**3
-        x3 = np.cos(lam)*x2/r
-        y3 = np.cos(lam)*y2/r
 
-        return x3, y3
+        if unwarp:
+            # unwarping
+            b = np.arcsin(self.RE/(self.RE+self.ha)*np.sin(lam+np.pi/2))  # Law of Sines
+            psi = np.pi/2-lam-b
+            d = (self.RE+self.ha)*psi
+        else:
+            d = np.cos(lam)
+
+        x3 = d*x2/r
+        y3 = d*y2/r
+
+        if return_elev:
+            return x3, y3, lam
+        else:
+            return x3, y3
 
     def residuals(self, params, x, y, xp, yp):
         x0, y0, theta, A, B, C, D = params
-        xt, yt = self.transform(x, y, x0, y0, theta, A, B, C, D)
+        xt, yt = self.transform(x, y, x0, y0, theta, A, B, C, D, unwarp=False)
         res = np.sqrt((xp-xt)**2 + (yp-yt)**2)
         return res
 
@@ -92,7 +111,7 @@ class Calibrate:
         A, B, C, D = [np.pi/2, -np.pi/2, 0., 0.]
 
         # calculate transformation with initial tranlation and lens function params but no rotation
-        xu, yu = self.transform(x, y, x0, y0, 0., A, B, C, D)
+        xu, yu = self.transform(x, y, x0, y0, 0., A, B, C, D, unwarp=False)
 
         # Find rotation matrix such that the vectors to the star locations roughly match
         Pu = np.array([xu, yu, np.zeros(len(x))]).T
@@ -104,48 +123,68 @@ class Calibrate:
         return [x0, y0, theta, A, B, C, D]
 
 
-    def transformed_data_grid(self):
+    def create_calibration_arrays(self):
 
         # Create a grid and find the transformed coordinates of each grid point
         i_grid, j_grid = np.meshgrid(np.arange(self.Imax),np.arange(self.Jmax))
         x_grid, y_grid = self.normalize_pixel_coords(i_grid, j_grid)
-        self.xt_grid, self.yt_grid = self.transform(x_grid, y_grid, self.x0, self.y0, self.theta, self.A, self.B, self.C, self.D)
 
-        # Find elevation angle of each point on the grid
-        r = np.sqrt((x_grid-self.x0)**2 + (y_grid-self.y0)**2)
-        self.lam_grid = (self.A + self.B*r + self.C*r**2 + self.D*r**3)
-        # Use elevation angle grid to create mask in all locations below the horizon
+        self.xt_grid, self.yt_grid, lam_grid = self.transform(x_grid, y_grid, self.x0, self.y0, self.theta, self.A, self.B, self.C, self.D, return_elev=True)
+
+        # create mask
         self.mask = np.zeros((self.Jmax, self.Imax), dtype=bool)
-        self.mask[self.lam_grid<0.] = True
+        self.mask[lam_grid<self.elevCutoff*np.pi/180.] = True
 
-        self.xt_grid[self.mask] = np.nan
-        self.yt_grid[self.mask] = np.nan
+        # atmospheric corrections
+        self.atmosphericCorrection = self.atmospheric_corrections(lam_grid)
+        self.atmosphericCorrection[self.mask] = np.nan
 
 
-    def atmospheric_corrections(self):
+    def atmospheric_corrections(self, elev):
         # Atmospheric corrections are taken from Kubota et al., 2001
         # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
         #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
         #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
 
-        RE = 6371.0  # kilometers
-        ha = self.altitude  # kilometers
-        za = np.pi/2-self.lam_grid
+        # calculate zenith angle
+        za = np.pi/2-elev
 
         # Kubota et al., 2001; eqn. 6
-        vanRhijnFactor = np.sqrt(1.0 - np.sin(za)**2*(RE/(RE+ha))**2)
+        vanRhijnFactor = np.sqrt(1.0 - np.sin(za)**2*(self.RE/(self.RE+self.ha))**2)
 
         # Kubota et al., 2001; eqn. 7,8
         a = 0.2
         F = 1. / (np.cos(za) + 0.15 * (93.885 - za*180./np.pi) ** (-1.253))
         extinctionFactor = 10.0 ** (0.4 * a * F)
 
-        self.atmosphericCorrection = vanRhijnFactor * extinctionFactor
-        self.atmosphericCorrection[self.mask] = np.nan
+        return vanRhijnFactor * extinctionFactor
 
 
 
-    def create_calibration_file(self):
+    # def create_new_position_arrays():
+    #
+    #     newX = np.linspace(np.min(self.xt_grid[~self.mask]),np.max(self.xt_grid[~self.mask]), self.newImax)
+    #     newY = np.linspace(np.min(self.yt_grid[~self.mask]),np.max(self.yt_grid[~self.mask]), self.newJmax)
+    #
+    #     newXGrid, newYGrid = np.meshgrid(newX, newY)
+    #
+    #     psi = np.sqrt(newXGrid**2 + newYGrid**2)/(self.RE+self.ha)
+    #     c = np.sqrt(self.RE**2 + self.ha**2 - 2*self.RE*(self.RE+self.ha)*np.cos(psi))  # Law of Cosines
+    #     elv = np.arcsin((self.RE+self.ha)/c*np.sin(psi)) - np.pi/2.     # Law of Sines
+    #     azm = np.arctan2(newXGrid, newYGrid)
+    #
+    #     lat = np.arcsin(np.sin(self.siteLat*np.pi/180.) * np.cos(psi) +
+    #                   np.cos(self.siteLat*np.pi/180.) * np.sin(psi) * np.cos(azm))
+    #     lon = self.siteLon*np.pi/180. + np.arctan2(np.sin(azm) * np.sin(psi) * np.cos(self.siteLon*np.pi/180.),
+    #                                   np.cos(psi) - np.sin(self.siteLat*np.pi/180.) * np.sin(lat))
+    #
+    #     self.latitude = lat*180./np.pi
+    #     self.longitude = lon*180./np.pi
+
+
+
+
+    def save_calibration_file(self):
 
         with h5py.File(self.outputFile, 'w') as f:
 
@@ -168,9 +207,11 @@ class Calibrate:
             rotate = f.create_dataset('rotation_angle', data=self.theta)
             rotate.attrs['Description'] = 'Rotation angle'
 
-            alt = f.create_dataset('altitude', data=self.altitude)
+            alt = f.create_dataset('altitude', data=self.ha)
             alt.attrs['Description'] = 'Assumed airglow altituded used for atmospheric correction (km)'
 
+            elev = f.create_dataset('elevation_cutoff', data=self.elevCutoff)
+            elev.attrs['Description'] = 'Lowest allowed elevation angle'
     # def mock(self):
     #     print('WARNING: THIS IS A MOCK ROUTINE.  Instead of calculating new calibration parameters, it converts the old calibration files to the new format and assigns a pre-designated rotation angle.')
     #

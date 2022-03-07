@@ -30,6 +30,7 @@ from scipy.interpolate import griddata
 import numpy as np
 import copy
 import skimage.transform
+from scipy.interpolate import griddata
 import h5py
 from PIL import Image
 
@@ -95,30 +96,28 @@ class MANGOImage:
                                                             angle, order=3)).astype(float)
 
 
-    def transformImage(self, transformedCoords, atmosphericCorrection, mask, newImgShape=None):
-        # Perform the translation/rotation/unwarping required for full unwarping
+    def transformImage(self, transformedCoords, atmosphericCorrection, mask, newCoords):
+        # Interpolate the transformed coordinates to new (regular grid) coordinates.  This takes care of all
+        #   traslation/rotation/unwarping required to create a fully calibrated image.
+        #   Also apply atmospheric corrections.
 
         img_corr = self.imageData*atmosphericCorrection
         xt_grid = transformedCoords[0]
         yt_grid = transformedCoords[1]
 
-        # Default to the original image shape
-        if not newImgShape:
-            newImax, newJmax = self.imageData.shape
-        else:
-            newImax, newJmax = newImgShape
-        # create new array for regridding
-        i_grid, j_grid = np.meshgrid(np.arange(newImax),np.arange(newJmax))
-        RL = newJmax/2.
-        x_grid = (newImax/2.-i_grid)/RL
-        y_grid = (newJmax/2.-j_grid)/RL
-
-        from scipy.interpolate import griddata
+        x_grid = newCoords[0]
+        y_grid = newCoords[1]
 
         interpolatedData = griddata((xt_grid[~mask], yt_grid[~mask]), img_corr[~mask], (x_grid, y_grid), fill_value=0)
 
         interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData)))
         self.imageData = interpolatedData.astype('uint8')
+
+
+    # def calibrateImage(self):
+    #
+    #     img_cal = griddata((xt_grid[lam_grid>el_cutoff], yt_grid[lam_grid>el_cutoff]), img_corr[lam_grid>el_cutoff], (new_x_grid, new_y_grid))
+
 
 
     def applyMask(self, mask, fillValue=0):
