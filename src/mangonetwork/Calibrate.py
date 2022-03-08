@@ -66,7 +66,6 @@ class Calibrate:
         init_params = self.initial_params(x, y, xp, yp)
         params = least_squares(self.residuals, init_params, args=(x, y, xp, yp))
         self.x0, self.y0, self.theta, self.A, self.B, self.C, self.D = params.x
-        print(self.theta)
 
 
     def transform(self, x, y, x0, y0, theta, A, B, C, D, unwarp=True, return_elev=False):

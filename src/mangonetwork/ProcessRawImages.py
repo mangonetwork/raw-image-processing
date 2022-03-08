@@ -5,7 +5,7 @@ from .MANGOImage import MANGOImage
 import argparse
 import re
 import pandas as pd
-import pymap3d as pm
+# import pymap3d as pm
 import datetime as dt
 import numpy as np
 import h5py
@@ -238,21 +238,26 @@ class ProcessImage:
             Lon.attrs['Projection Altitude'] = self.ha
             Lon.attrs['Unit'] = 'degrees'
 
-            Lat = f.create_dataset('Azimuth', data=self.azimuth, compression='gzip', compression_opts=1)
-            Lat.attrs['Description'] = 'azimuth of each pixel'
-            Lat.attrs['Size'] = 'Ipixels x Jpixels'
-            Lat.attrs['Unit'] = 'degrees'
+            az = f.create_dataset('Azimuth', data=self.azimuth, compression='gzip', compression_opts=1)
+            az.attrs['Description'] = 'azimuth of each pixel'
+            az.attrs['Size'] = 'Ipixels x Jpixels'
+            az.attrs['Unit'] = 'degrees'
 
-            Lon = f.create_dataset('Elevation', data=self.elevation, compression='gzip', compression_opts=1)
-            Lon.attrs['Description'] = 'elevation of each pixel'
-            Lon.attrs['Size'] = 'Ipixels x Jpixels'
-            Lon.attrs['Unit'] = 'degrees'
+            el = f.create_dataset('Elevation', data=self.elevation, compression='gzip', compression_opts=1)
+            el.attrs['Description'] = 'elevation of each pixel'
+            el.attrs['Size'] = 'Ipixels x Jpixels'
+            el.attrs['Unit'] = 'degrees'
+
+            el = f.create_dataset('PixelCoordinates', data=self.pixelCoords, compression='gzip', compression_opts=1)
+            el.attrs['Description'] = 'coordinates of each pixel in grid at the airglow altitude'
+            el.attrs['Size'] = '2 (X,Y) x Ipixels x Jpixels'
+            el.attrs['Unit'] = 'km'
 
             I = f.create_dataset('ImageData', data=self.imageArrays, compression='gzip', compression_opts=1)
             I.attrs['Description'] = 'pixel values for images'
             I.attrs['Site Abbreviation'] = self.code
             I.attrs['Image label'] = self.label
-            I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
+            # I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
 
             M = f.create_dataset('Mask', data=self.imageMask, compression='gzip', compression_opts=1)
             M.attrs['Description'] = 'image mask'
