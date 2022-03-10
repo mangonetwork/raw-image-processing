@@ -122,8 +122,8 @@ class ProcessImage:
         '''
 
         self.startTime = np.append(self.startTime, img.attrs['start_time'])
-        self.exposureTime = np.append(self.exposureTime, img.attrs['start_time'])
-        self.ccdTemp = np.append(self.ccdTemp, img.attrs['start_time'])
+        self.exposureTime = np.append(self.exposureTime, img.attrs['exposure_time'])
+        self.ccdTemp = np.append(self.ccdTemp, img.attrs['ccd_temp'])
 
 
     # def create_position_arrays(self):
