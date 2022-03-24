@@ -34,14 +34,9 @@ class QuickLook:
         config = configparser.ConfigParser()
         config.read(self.configFile)
 
-        self.siteName = config.get('DEFAULT','SITE_NAME')
-        self.contrast = config.getint('DEFAULT','CONTRAST')
-        if config.has_option('DEFAULT','ROTATION_ANGLE'):
-            self.rotationAngle = config.getfloat('DEFAULT','ROTATION_ANGLE')
-        else:
-            calFile = config.get('DEFAULT','CALIBRATION_FILE')
-            with h5py.File(calFile, 'r') as f:
-                self.rotationAngle = f['Calibration Angle'][()]
+        self.siteName = config.get('PROCESSING','SITE_NAME')
+        self.contrast = config.getint('PROCESSING','CONTRAST')
+        self.rotationAngle = config.getfloat('QUICKLOOK','ROTATION_ANGLE')
 
 
 

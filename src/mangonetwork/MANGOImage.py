@@ -30,6 +30,7 @@ from scipy.interpolate import griddata
 import numpy as np
 import copy
 import skimage.transform
+from scipy.interpolate import griddata
 import h5py
 from PIL import Image
 
@@ -95,63 +96,91 @@ class MANGOImage:
                                                             angle, order=3)).astype(float)
 
 
-    # What does this do??
-    # Effetively where the Fish-Eye dewarping occurs
-    # Certain points are mapped to new coordinates and then the rest of the array is filled in with interpolation
-    # There are probably better ways to do this ...
-    # Should be able to add a NaN mask to just image array
-    # imageData = data
-    # imageArray = data + masking array
-    def mercatorUnwrap(self, newIMatrix, newJMatrix, backgroundCorrection):
-        ID_array = self.imageData
-        newImageWidth = 500
-        newImageHeight = 500
-        finalImage = np.ones([newImageHeight, newImageWidth]) * -1
+    def transformImage(self, transformedCoords, atmosphericCorrection, mask, newCoords):
+        # Interpolate the transformed coordinates to new (regular grid) coordinates.  This takes care of all
+        #   traslation/rotation/unwarping required to create a fully calibrated image.
+        #   Also apply atmospheric corrections.
 
-        #it doesn't work for differently sized image arrays
+        img_corr = self.imageData*atmosphericCorrection
+        xt_grid = transformedCoords[0]
+        yt_grid = transformedCoords[1]
 
-        for j in range(ID_array.shape[0]):
-            for i in range(ID_array.shape[1]):
-                newI = newIMatrix[j][i]
-                newJ = newJMatrix[j][i]
-                if not (np.isnan(newI)) and not (np.isnan(newJ)) and not \
-                        (np.isnan(backgroundCorrection[j, i])):
-                    ID_array[j, i] = ID_array[j, i] * backgroundCorrection[j, i]
-                    finalImage[int(newJ), int(newI)] = ID_array[j, i]
+        x_grid = newCoords[0]
+        y_grid = newCoords[1]
 
+        interpolatedData = griddata((xt_grid[~mask], yt_grid[~mask]), img_corr[~mask], (x_grid, y_grid), fill_value=0)
 
-        # most of this can probably be done with np.where(np.isfinite())
-        (iKnown, jKnown) = np.where(finalImage >= 0)
-        valuesKnown = np.extract(finalImage >= 0, finalImage)
-        (iAll, jAll) = np.where(finalImage >= -1)
-        interpolatedData = np.reshape(
-            griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='cubic', fill_value=-1),
-            [newImageWidth, newImageHeight])
-
-        # This only needs to be done once and is slow
-        # Move to outer ProcessImage class
-        alphaMask = np.ones([newImageHeight, newImageWidth]) * 255
-        alphaMask[interpolatedData == -1] = 0
-        self.alphaMask = alphaMask.astype('uint8')
-        # for j in range(interpolatedData.shape[0]):
-        #     for i in range(interpolatedData.shape[1]):
-        #         if interpolatedData[j, i] == -1:
-        #             # alphaMask[j, i] = 0
-        #             alphaMask[j, i] = np.nan  # to create transparent background
-
-
-        # interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData))).astype('uint8')
-        # alphaMask = alphaMask.astype('uint8')
-        # ID_array = np.dstack([interpolatedData, alphaMask])
-        # self.writeMode = 'LA'
-        # self.imageArray = ID_array
         interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData)))
-        # interpolatedData[np.isnan(alphaMask)] = np.nan
-        # alphaMask = alphaMask.astype('uint8')
-        # ID_array = np.dstack([interpolatedData, alphaMask])
-        # self.writeMode = 'LA'
-        # self.imageArray = interpolatedData
         self.imageData = interpolatedData.astype('uint8')
+
+
+    # def calibrateImage(self):
+    #
+    #     img_cal = griddata((xt_grid[lam_grid>el_cutoff], yt_grid[lam_grid>el_cutoff]), img_corr[lam_grid>el_cutoff], (new_x_grid, new_y_grid))
+
+
+
+    def applyMask(self, mask, fillValue=0):
+        # apply a mask to the image by filling the mask region with a set value (defaults to 0)
+        self.imageData[mask] = int(fillValue)
+
+    # # What does this do??
+    # # Effetively where the Fish-Eye dewarping occurs
+    # # Certain points are mapped to new coordinates and then the rest of the array is filled in with interpolation
+    # # There are probably better ways to do this ...
+    # # Should be able to add a NaN mask to just image array
+    # # imageData = data
+    # # imageArray = data + masking array
+    # def mercatorUnwrap(self, newIMatrix, newJMatrix, backgroundCorrection):
+    #     ID_array = self.imageData
+    #     newImageWidth = 500
+    #     newImageHeight = 500
+    #     finalImage = np.ones([newImageHeight, newImageWidth]) * -1
+    #
+    #     #it doesn't work for differently sized image arrays
+    #
+    #     for j in range(ID_array.shape[0]):
+    #         for i in range(ID_array.shape[1]):
+    #             newI = newIMatrix[j][i]
+    #             newJ = newJMatrix[j][i]
+    #             if not (np.isnan(newI)) and not (np.isnan(newJ)) and not \
+    #                     (np.isnan(backgroundCorrection[j, i])):
+    #                 ID_array[j, i] = ID_array[j, i] * backgroundCorrection[j, i]
+    #                 finalImage[int(newJ), int(newI)] = ID_array[j, i]
+    #
+    #
+    #     # most of this can probably be done with np.where(np.isfinite())
+    #     (iKnown, jKnown) = np.where(finalImage >= 0)
+    #     valuesKnown = np.extract(finalImage >= 0, finalImage)
+    #     (iAll, jAll) = np.where(finalImage >= -1)
+    #     interpolatedData = np.reshape(
+    #         griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='cubic', fill_value=-1),
+    #         [newImageWidth, newImageHeight])
+    #
+    #     # This only needs to be done once and is slow
+    #     # Move to outer ProcessImage class
+    #     alphaMask = np.ones([newImageHeight, newImageWidth]) * 255
+    #     alphaMask[interpolatedData == -1] = 0
+    #     self.alphaMask = alphaMask.astype('uint8')
+    #     # for j in range(interpolatedData.shape[0]):
+    #     #     for i in range(interpolatedData.shape[1]):
+    #     #         if interpolatedData[j, i] == -1:
+    #     #             # alphaMask[j, i] = 0
+    #     #             alphaMask[j, i] = np.nan  # to create transparent background
+    #
+    #
+    #     # interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData))).astype('uint8')
+    #     # alphaMask = alphaMask.astype('uint8')
+    #     # ID_array = np.dstack([interpolatedData, alphaMask])
+    #     # self.writeMode = 'LA'
+    #     # self.imageArray = ID_array
+    #     interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData)))
+    #     # interpolatedData[np.isnan(alphaMask)] = np.nan
+    #     # alphaMask = alphaMask.astype('uint8')
+    #     # ID_array = np.dstack([interpolatedData, alphaMask])
+    #     # self.writeMode = 'LA'
+    #     # self.imageArray = interpolatedData
+    #     self.imageData = interpolatedData.astype('uint8')
 
 
 
