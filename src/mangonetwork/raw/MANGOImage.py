@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
-#######################################################################
+##########################################################################
 #
 #   Image Processing Core Engine for MANGO
 #   (Midlatitude All-sky-imager Network for Geophysical Observation)
+#
 #   2013-01-23  Rohit Mundra
 #               Initial implementation
 #
@@ -18,9 +19,10 @@
 #   2013-02-22  Fabrice Kengne
 #               Adding compatibility for FITS read
 #
-# 2014-10-25  Asti Bhatt
-# Adding compatibility for BU software generated .153 files
-#######################################################################
+#   2014-10-25  Asti Bhatt
+#               Adding compatibility for BU software generated .153 files
+#
+##########################################################################
 
 # script containing image manipulation functions for processing and quicklooks
 
