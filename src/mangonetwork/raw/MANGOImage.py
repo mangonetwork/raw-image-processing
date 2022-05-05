@@ -94,8 +94,8 @@ class MANGOImage:
 
 
     def rotateImage(self, angle):
-        self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
-                                                            angle, order=3)).astype(float)
+        self.imageData = skimage.transform.rotate(np.fliplr(self.imageData),
+                                                            angle, order=3).astype(float)
 
 
     def transformImage(self, transformedCoords, atmosphericCorrection, mask, newCoords):
