@@ -1,4 +1,4 @@
-#!/usr/bin/env python3 
+#!/usr/bin/env python3
 
 import os
 import sys
@@ -43,7 +43,7 @@ class QuickLook:
 
         imageWriter = hcipy.plotting.FFMpegWriter(outputFile, framerate = 10)
 
-        for filename in inputList: 
+        for filename in inputList:
             logging.debug(filename)
             self.plot(filename, imageWriter)
 
@@ -52,8 +52,6 @@ class QuickLook:
     def plot(self, filename, imageWriter):
 
         wavelength = {'': 'Unknown', 'Green Line': '557.7 nm', 'Red Line': '630.0 nm'}
-
-        image = h5py.File(filename, 'r')['image']
 
         cooked_image = MANGOImage(np.array(image))
         cooked_image.equalizeHistogram(self.contrast)
@@ -96,9 +94,9 @@ def parse_args():
 
     parser.add_argument('-c', '--config', metavar='FILE',
                         help='Alternate configuration file')
-    parser.add_argument('-f', '--filelist', metavar='FILE', 
+    parser.add_argument('-f', '--filelist', metavar='FILE',
                         help='A file with a list of .hdf5 file names')
-    parser.add_argument('-o', '--output', default='mango.mp4', 
+    parser.add_argument('-o', '--output', default='mango.mp4',
                         help='Output filename (default is mango.mp4)')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Verbose output')
@@ -115,7 +113,7 @@ def find_config(filename):
 
     name = '%s-%s.ini' % (station, instrument)
 
-    logging.debug('Using package configuration file: %s' % name) 
+    logging.debug('Using package configuration file: %s' % name)
 
     return resources.files('mangonetwork.raw.data').joinpath(name).read_text()
 
@@ -128,7 +126,7 @@ def main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    if args.filelist:   
+    if args.filelist:
         inputs = [line.strip() for line in open(args.filelist)]
         inputs = [line for line in inputs if line]
     else:
@@ -149,15 +147,14 @@ def main():
     else:
         contents = find_config(inputs[0])
 
-    config = configparser.ConfigParser() 
+    config = configparser.ConfigParser()
     config.read_string(contents)
 
     logging.debug('Configuration file: %s' % args.config)
-    
+
     QuickLook(config, inputs, args.output)
 
     sys.exit(0)
 
 if __name__ == '__main__':
     main()
-
