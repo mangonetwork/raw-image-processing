@@ -53,6 +53,8 @@ class QuickLook:
 
         wavelength = {'': 'Unknown', 'Green Line': '557.7 nm', 'Red Line': '630.0 nm'}
 
+        image = h5py.File(filename, 'r')['image']
+
         cooked_image = MANGOImage(np.array(image))
         cooked_image.equalizeHistogram(self.contrast)
         cooked_image.rotateImage(self.rotationAngle)
