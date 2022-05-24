@@ -1,0 +1,117 @@
+This file contains step-by-step instructions for how to manually process raw data from the MANGO all-sky imagers.
+
+Updated: 2022-05-24 - L. Lamarche
+
+Download Data
+=============
+
+First, download some data from the public archive of raw MANGO data, found here:
+
+https://data.mangonetwork.org/data/transport/mango/archive/
+
+Files on this server use the following directory structure:
+
+https://data.mangonetwork.org/data/transport/mango/archive/SSS/xline/raw/YYYY/DOY/HH/
+
+SSS = three-letter site code (lowercase)
+xline = redline or greenline
+YYYY = year
+DOY = day of year (January 1 = 001)
+HH = Unix hour of day
+
+These directories contain both *.png and *.hdf5 files for each capture time.  For processing raw data, you only need the *.hdf5 files.  The file naming convention is as follows:
+
+mango-SSS-xline-YYYYMMDD-HHMMSS.hdf5
+
+YYYYMMDD = year, month, day of month
+HHMMSS = hour, minute, second
+
+
+As a complete example, the redline data file from Capitol Reef Field Station (cfs) on February 16, 2022 10:00:00 will have the following url:
+
+https://data.mangonetwork.org/data/transport/mango/archive/cfs/redline/raw/2022/047/10/mango-cfs-redline-20220216-100000.hdf5
+
+
+File can be downloaded either by "point & click" from the browser or using a command line tool like wget (there may be other tools for this as well).  Be aware that wget cannot typically handle wildcard characters, so you will have to use some of the more advanced options to download groups of files.
+
+
+Install Processing Code
+=======================
+
+All processing code is open source and available on github: https://github.com/mangonetwork/raw-image-processing
+
+To run the processing code, you must install it on your local machine.
+
+1. Clone the repository
+    $ git clone https://github.com/mangonetwork/raw-image-processing.git
+2. Enter the top directory
+    $ cd raw-image-processing
+3. Check out the develop branch
+    $ git checkout develop
+4. Install a development version with pip
+    $ pip install -e .
+
+
+Calibration
+===========
+
+In order to process data, you need a calibration file for that particular camera that contains information about how the image should be rotated and corrected.  If you already have a calibration file for the camera in question, you can reuse it for any processing of data that use the same basic parameters and skip this step.
+
+If you DO NOT have a calibration file for this camera:
+
+1. Download the appropriate "default" config file from https://github.com/mangonetwork/raw-image-processing/tree/develop/src/mangonetwork/raw/data
+  - This is NOT the calibration file that this process will are creating, this is just a configuration file that specifies various information needed to calculate calibration parameters
+  - You can technically recreate this config file from scratch if you want, but downloading the default gives a good outline to start with.
+
+2. Obtain a star calibration file for this camera
+  - This is also NOT the calibration file that this process is creating
+  - See Star Calibration File section for more information
+
+3. Edit the STAR_CAL_FILE field in the config file so it points to your star calibration file.
+
+4. Edit the CALIBRATION_FILE field in the config file to be the desired path/name of the calibration file that will be produced.
+
+5. Edit any other fields under the [CALIBRATION] section of the config file to customize the calibration.
+  - In general, the default values here will be appropriate for most normal processing.
+
+6. Run the mango calibration specifying your config file.
+    $ mango-calibrate -c <config_file.ini>
+
+IMPORTANT: Any time you change any of the CALIBRATION parameters in the config file, it will produce a DIFFERENT calibration file that should only be used for the specific parameters specified when it was created.  Be careful not to unintentionally overwrite calibration files or reuse them for multiple different cameras.
+
+
+Processing
+==========
+
+The processing code requires a calibration file that tells the program how the images should be rotated and corrected.  If you do not have a calibration file for the specific camera you are processing, refer to the Calibration section.
+
+1. Obtain an appropriate config file.  This will most often be THE SAME config file used in the calibration routine.
+  - Alternatively, you can download a "default" config file from https://github.com/mangonetwork/raw-image-processing/tree/develop/src/mangonetwork/raw/data
+  - Modify field in the [PROCESSING] section appropriately.
+
+2. Make sure the CALIBRATION_FILE field points to the correct calibration file.  If you used the same config file for calibration and processing, just don't change this field.
+
+3. Run the processing code.
+    $ mango-process-raw-images -c <config_file.ini> -i <list of input raw files> -o <output file name>
+  - Wildcard characters can usually be used to create the list of raw input files
+  - The output file will be a single hdf5 file containing processed data from ALL the input files in order
+
+Example:  If you mimic the directory structure on the server, the following should process all data from the single night of CFS data shown above:
+    $ mango-process-raw-images -c <config_file.ini> -i /path/to/mango/data/cfs/redline/raw/2022/047/*/mango-cfs-redline-20220216-*.hdf5  -o cfs-redline-20220216_processed.hdf5
+
+
+Star Calibration File
+=====================
+
+The star calibration file is a text file that maps the physical location of stars and other celestial objects in the sky at a particular time to their positions in a MANGO camera image.  The calibration procedure needs this information to calculate the rotation angle and lens function that are needed to make each image North-facing and correct for distortion due to the fish-eye lens.  An example of the first few lines of a start calibration file for the CFS redline camera are shown below.  The fields from left to right are star/object name or identifier, true elevation angle (deg), true azimuth angle (deg), i pixel location, j pixel location.
+
+Almach          84.4    39.033  333.1   248.0
+Fomalhault      11.9    216.36  612.6   178.1
+Jupiter         14.033  238.66  563.7   87.1
+Scheat          55.1    265.6   411.1   126.9
+Alpheratz       68.08   253.016 405.7   178.0
+Mirach          82.55   253.466 370.7   221.1
+
+Technically any arbitrary point in the image that has a known physical location could be used to calibrate the images, but star are convenient because they are easy to pinpoint and have well-defined physical locations.  At least 9 stars are needed to solve for all unknown parameters in the calibration program, but as many as possible will improve the results.
+
+Presently, star files can only be generated by manually comparing a clear image with star charts at the corresponding time and notating the pixel location for each star.  Astronomy software like Stellarium can be useful for this.  This is time intensive and a better solution will be developed in the future.  The MANGO team has collected reasonable star calibration files for most cameras, contact them to get copies of these files.
