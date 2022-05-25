@@ -2,6 +2,14 @@ This file contains step-by-step instructions for how to manually process raw dat
 
 Updated: 2022-05-24 - L. Lamarche
 
+Workflow Summary
+================
+1. Download raw hdf5 data files
+2. Create star calibration file (only needs to be done once per camera)
+3. Run the calibration program (only needs to be done once per camera)
+4. Run processing program on raw data files
+
+
 Download Data
 =============
 
@@ -55,7 +63,7 @@ To run the processing code, you must install it on your local machine.
 Calibration
 ===========
 
-In order to process data, you need a calibration file for that particular camera that contains information about how the image should be rotated and corrected.  If you already have a calibration file for the camera in question, you can reuse it for any processing of data that use the same basic parameters and skip this step.
+In order to process data, you need a calibration file for that particular camera that contains information about how the image should be rotated and corrected.  If you already have a calibration file for the camera in question, you can reuse it for any processing of data that use the same basic parameters and skip this step.  As a general rule, this calibration procedure should only need to be performed ONCE for each camera.
 
 If you DO NOT have a calibration file for this camera:
 
