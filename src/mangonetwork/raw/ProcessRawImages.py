@@ -9,6 +9,7 @@ import pandas as pd
 import datetime as dt
 import numpy as np
 import h5py
+from BITtoHDF5 import BITtoHDF5
 
 warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
@@ -45,6 +46,15 @@ class ProcessImage:
         # read from calibration file?
         # self.targAlt = config.getfloat('PROCESSING','IMAGEALTITUDE')
 
+    def hdf5Check(self, inputFile):
+        # hardcoded
+        bhconfig = 'BITtoHDF5config.ini'
+        outputFile = 'something' #again, not sure about the syntax
+        # can also store this in the config file
+        if inputFile[-1:]!= '5': #hdf5 or h5
+            conversion_object = BITtoHDF5(bhconfig, inputFile,outputFile)
+            conversion_object.write_to_HDF5()
+        return outputFile
 
     def read_calfile(self):
 
@@ -72,8 +82,11 @@ class ProcessImage:
         self.get_time_independent_information(self.rawList[0])
         self.create_position_arrays()
         for file in self.rawList:
-            print(file)
+            file = self.hdf5Check(file)
             with h5py.File(file, 'r') as hdf5_file:
+                # OLD FORMAT will breakdown here
+                # NEED TO OBTAIN IMAGE DATA FROM BIT FILE
+                # create a general function that obtains image data
                 imageData = hdf5_file['image'][:]
                 self.get_time_dependent_information(hdf5_file['image'])
                 # picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
@@ -97,6 +110,7 @@ class ProcessImage:
 
 
     def get_time_independent_information(self, file):
+        # OLD FORMAT will breakdown here
         with h5py.File(file, 'r') as hdf5_file:
             data = hdf5_file['image']
             self.code = data.attrs['station']
@@ -112,6 +126,7 @@ class ProcessImage:
     # consider appending this in loop?
     # Just a style preference
     def get_time_dependent_information(self, img):
+        # OLD FORMAT will breakdown here
         '''
         Obtains the following attributes:
         1. start_time
