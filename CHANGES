@@ -5,3 +5,11 @@
             Refactor QuicklookMovies
             Move into mangonetwork.raw package namespace
             Add in package data files
+
+2022-06-29  Todd Valentic
+            Fix image size to fill full space (no blank axes)
+            Release 1.0.2
+
+2022-08-18  Todd Valentic
+            Add place holder configuration for PAR 
+            Release 1.0.3

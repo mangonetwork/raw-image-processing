@@ -6,6 +6,7 @@ import configparser
 import argparse
 import logging
 import datetime
+import pathlib
 
 import h5py
 import hcipy
@@ -38,8 +39,7 @@ class QuickLook:
         outputFile = os.path.abspath(outputFile)
         outputPath = os.path.split(outputFile)[0]
 
-        if not os.path.exists(outputPath):
-            os.makedirs(outputPath)
+        pathlib.Path(outputPath).mkdir(parents=True, exist_ok=True)
 
         imageWriter = hcipy.plotting.FFMpegWriter(outputFile, framerate = 10)
 
@@ -66,26 +66,32 @@ class QuickLook:
         label = image.attrs['label']
         latlon = '%4.1f N, %5.1f W' % (image.attrs['latitude'],image.attrs['longitude'])
 
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(facecolor='black')
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+
         ax.imshow(cooked_image.imageData, cmap='gray')
 
-        ax.annotate('N', xy=(350, 20), color='white')
-        ax.annotate('E', xy=(620, 520//2), color='white')
-        ax.annotate('%s' % start_time.date(), xy=(10, 20), color='white')
-        ax.annotate('%s UTC' % start_time.time(), xy=(10, 40), color='white')
+        ny, nx = cooked_image.imageData.shape
+        dy = 20
+        lx = 10
+        rx = nx-lx
+        by = 470
 
-        ax.annotate(label, xy=(680,20), color='white', ha='right')
-        ax.annotate(wavelength[label], xy=(680,40), color='white', ha='right')
-        ax.annotate('%+5.1f C' % ccd_temp, xy=(680, 60), color='white', ha='right')
-        ax.annotate('%s s' % exposure_time, xy=(680,80), color='white', ha='right')
+        ax.annotate('N', xy=(nx/2, dy), ha='center', color='white')
+        ax.annotate('E', xy=(nx-60, ny/2), ha='right', color='white')
+        ax.annotate('%s' % start_time.date(), xy=(lx, dy), color='white')
+        ax.annotate('%s UTC' % start_time.time(), xy=(lx, 2*dy), color='white')
 
-        ax.annotate('%s - %s' % (code.upper(), self.siteState), xy=(10,470), color='white')
-        ax.annotate(latlon, xy=(10,490), color='white')
-        ax.annotate(self.siteName, xy=(10,510), color='white')
+        ax.annotate(label, xy=(rx,dy), color='white', ha='right')
+        ax.annotate(wavelength[label], xy=(rx,2*dy), color='white', ha='right')
+        ax.annotate('%+5.1f C' % ccd_temp, xy=(rx, 3*dy), color='white', ha='right')
+        ax.annotate('%s s' % exposure_time, xy=(rx,4*dy), color='white', ha='right')
 
-        ax.annotate('NSF/SRI MANGO DASI', xy=(680,510), color='white', ha='right')
+        ax.annotate('%s - %s' % (code.upper(), self.siteState), xy=(lx,by), color='white')
+        ax.annotate(latlon, xy=(lx,by+dy), color='white')
+        ax.annotate(self.siteName, xy=(lx,by+2*dy), color='white')
 
-        plt.axis('off')
+        ax.annotate('NSF/SRI MANGO DASI', xy=(rx,by+2*dy), color='white', ha='right')
 
         imageWriter.add_frame(fig)
         plt.close()
