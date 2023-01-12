@@ -21,12 +21,6 @@ class StarCal:
 
     def __init__(self, starCalFile):
 
-        # raw_file = '/Users/e30737/Desktop/Data/MANGO/blo/greenline/mango-blo-greenline-20211129-061400.hdf5'
-        # # starCalFile = '/Users/e30737/Desktop/Projects/MANGO/star_cal_files/BLO_green_20211129_061400.txt'
-        # starCalFile = '/Users/e30737/Desktop/Projects/MANGO/raw-image-processing/src/mangonetwork/raw/data/starcal_blo_green.txt'
-        # # raw_file = '/Users/e30737/Desktop/Data/MANGO/low/greenline/2021/333/04/mango-low-greenline-20211129-043600.hdf5'
-        # # starCalFile = '/Users/e30737/Desktop/Projects/MANGO/star_cal_files/LOW_green_20211129_043600.txt'
-
         self.plot_stars(starCalFile)
 
     def plot_stars(self, starCalFile):
@@ -38,46 +32,17 @@ class StarCal:
         contrast = 99.95
         rotationAngle = 0.
 
-        # raw_file = '/Users/e30737/Desktop/Data/MANGO/blo/greenline/mango-blo-greenline-20211129-061400.hdf5'
-
         image = h5py.File(raw_file, 'r')['image']
-        print(image.shape)
 
         cooked_image = MANGOImage(np.array(image))
         cooked_image.equalizeHistogram(contrast)
-        # cooked_image.invertImage()
         cooked_image.rotateImage(rotationAngle)
 
-        # start_time = datetime.datetime.utcfromtimestamp(image.attrs['start_time'])
-        # exposure_time = image.attrs['exposure_time']
-        # ccd_temp = image.attrs['ccd_temp']
-        # code = image.attrs['station']
-        # label = image.attrs['label']
-        # latlon = '%4.1f N, %5.1f W' % (image.attrs['latitude'],image.attrs['longitude'])
 
-        # print(starCalFile)
-        # el, az, i, j = np.loadtxt(starCalFile, usecols=(1,2,3,4), unpack=True)
-        # print(min(i), max(i), min(j), max(j))
-
-
-        # fig, ax = plt.subplots()
         fig = plt.figure(figsize=(15,10))
         ax = fig.add_subplot(111)
-        # ax.imshow(cooked_image.imageData, cmap='gray', origin='upper')
         ax.imshow(cooked_image.imageData, cmap='gray')
         ax.scatter(i, j, facecolors='none', edgecolors='r')
-
-        xp = 519./2.*np.cos(el)*np.sin(az)+695./2.
-        yp = 519./2.*np.cos(el)*np.cos(az)+519./2.
-        ax.scatter(xp, yp)
-
-        # ax = fig.add_subplot(122)
-        # xp = np.cos(el)*np.sin(az)
-        # yp = np.cos(el)*np.cos(az)
-        # ax.scatter(xp, yp)
-        # ax.set_xlim([-1.0,1.0])
-        # ax.set_ylim([-1.0,1.0])
-        # ax.set_aspect('equal')
 
         plt.show()
 
@@ -86,14 +51,6 @@ class StarCal:
         raw_filename = starCalFile.split('\n')[0].split()[-1]
 
         az, el, i, j = np.loadtxt(io.StringIO(starCalFile), usecols=(1,2,3,4), unpack=True)
-
-        # data = list()
-        # for line in starCalFile.split('\n'):
-        #     if line.startswith('#') or len(line)==0:
-        #         continue
-        #     data.append([float(x) for x in line.split()[1:5]])
-        #
-        # az, el, i, j = np.array(data).T
 
         return az, el, i, j, raw_filename
 
@@ -113,10 +70,6 @@ def parse_args():
     return parser.parse_args()
 
 def find_starcal(station, instrument):
-
-    # with h5py.File(filename) as h5:
-    #     station = h5['image'].attrs['station']
-    #     instrument = h5['image'].attrs['instrument']
 
     starcal_file = 'starcal-%s-%s.txt' % (station, instrument)
 
@@ -142,8 +95,6 @@ def main():
         contents = open(args.starcal).read()
     else:
         contents = find_starcal(args.station, args.instrument)
-
-    # logging.debug('Configuration file: %s' % args.starcal)
 
     StarCal(contents)
 
