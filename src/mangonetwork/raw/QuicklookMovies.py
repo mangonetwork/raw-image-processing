@@ -31,7 +31,9 @@ class QuickLook:
         self.siteName = config.get('PROCESSING','SITE_NAME')
         self.siteState = config.get('PROCESSING','SITE_STATE')
         self.contrast = config.getint('PROCESSING','CONTRAST')
-        self.rotationAngle = config.getfloat('QUICKLOOK','ROTATION_ANGLE')
+        # self.rotationAngle = config.getfloat('QUICKLOOK','ROTATION_ANGLE')
+        self.rotationAngle = config.getfloat('CALIBRATION_PARAMS','THETA')
+        # self.rotationAngle = 0.
 
     def process_images(self, inputList, outputFile):
 
@@ -57,7 +59,9 @@ class QuickLook:
 
         cooked_image = MANGOImage(np.array(image))
         cooked_image.equalizeHistogram(self.contrast)
+        cooked_image.invertImage()
         cooked_image.rotateImage(self.rotationAngle)
+        # cooked_image.invertImage()
 
         start_time = datetime.datetime.utcfromtimestamp(image.attrs['start_time'])
         exposure_time = image.attrs['exposure_time']
@@ -67,7 +71,7 @@ class QuickLook:
         latlon = '%4.1f N, %5.1f W' % (image.attrs['latitude'],image.attrs['longitude'])
 
         fig, ax = plt.subplots()
-        ax.imshow(cooked_image.imageData, cmap='gray')
+        ax.imshow(cooked_image.imageData, cmap='gray', origin='upper')
 
         ax.annotate('N', xy=(350, 20), color='white')
         ax.annotate('E', xy=(620, 520//2), color='white')

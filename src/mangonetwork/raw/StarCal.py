@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import argparse
 import logging
+import io
 import sys
 if sys.version_info < (3,9):
     import importlib_resources as resources
@@ -44,6 +45,7 @@ class StarCal:
 
         cooked_image = MANGOImage(np.array(image))
         cooked_image.equalizeHistogram(contrast)
+        # cooked_image.invertImage()
         cooked_image.rotateImage(rotationAngle)
 
         # start_time = datetime.datetime.utcfromtimestamp(image.attrs['start_time'])
@@ -63,7 +65,11 @@ class StarCal:
         ax = fig.add_subplot(111)
         # ax.imshow(cooked_image.imageData, cmap='gray', origin='upper')
         ax.imshow(cooked_image.imageData, cmap='gray')
-        ax.scatter(695-i, j, facecolors='none', edgecolors='r')
+        ax.scatter(i, j, facecolors='none', edgecolors='r')
+
+        xp = 519./2.*np.cos(el)*np.sin(az)+695./2.
+        yp = 519./2.*np.cos(el)*np.cos(az)+519./2.
+        ax.scatter(xp, yp)
 
         # ax = fig.add_subplot(122)
         # xp = np.cos(el)*np.sin(az)
@@ -79,13 +85,15 @@ class StarCal:
 
         raw_filename = starCalFile.split('\n')[0].split()[-1]
 
-        data = list()
-        for line in starCalFile.split('\n'):
-            if line.startswith('#') or len(line)==0:
-                continue
-            data.append([float(x) for x in line.split()[1:5]])
+        az, el, i, j = np.loadtxt(io.StringIO(starCalFile), usecols=(1,2,3,4), unpack=True)
 
-        az, el, i, j = np.array(data).T
+        # data = list()
+        # for line in starCalFile.split('\n'):
+        #     if line.startswith('#') or len(line)==0:
+        #         continue
+        #     data.append([float(x) for x in line.split()[1:5]])
+        #
+        # az, el, i, j = np.array(data).T
 
         return az, el, i, j, raw_filename
 
@@ -94,25 +102,27 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Check the star identification for calibration')
 
-    parser.add_argument('imager', help='Imager code (ie. CFSred or BLOgreen)')
-    parser.add_argument('-c', '--config', metavar='FILE',
+    parser.add_argument('station', help='Station code')
+    parser.add_argument('instrument', help='redline or greenline')
+
+    parser.add_argument('-sc', '--starcal', metavar='FILE',
                         help='Alternate starcal file')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Verbose output')
 
     return parser.parse_args()
 
-def find_config(imager):
+def find_starcal(station, instrument):
 
     # with h5py.File(filename) as h5:
     #     station = h5['image'].attrs['station']
     #     instrument = h5['image'].attrs['instrument']
 
-    name = 'starcal-%s.txt' % (imager)
+    starcal_file = 'starcal-%s-%s.txt' % (station, instrument)
 
-    logging.debug('Using package starcal file: %s' % name)
+    logging.debug('Using package starcal file: %s' % starcal_file)
 
-    return resources.files('mangonetwork.raw.data').joinpath(name).read_text()
+    return resources.files('mangonetwork.raw.data').joinpath(starcal_file).read_text()
 
 def main():
 
@@ -124,16 +134,16 @@ def main():
         logging.basicConfig(level=logging.INFO)
 
 
-    if args.config:
-        logging.debug('Alternate starcal file: %s' % args.config)
-        if not os.path.exists(args.config):
+    if args.starcal:
+        logging.debug('Alternate starcal file: %s' % args.starcal)
+        if not os.path.exists(args.starcal):
             logging.error('Config file not found')
             sys.exit(1)
-        contents = open(args.config).read()
+        contents = open(args.starcal).read()
     else:
-        contents = find_config(args.imager)
+        contents = find_starcal(args.station, args.instrument)
 
-    logging.debug('Configuration file: %s' % args.config)
+    # logging.debug('Configuration file: %s' % args.starcal)
 
     StarCal(contents)
 
