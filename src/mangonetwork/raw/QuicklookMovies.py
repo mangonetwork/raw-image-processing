@@ -31,9 +31,11 @@ class QuickLook:
         self.siteName = config.get('PROCESSING','SITE_NAME')
         self.siteState = config.get('PROCESSING','SITE_STATE')
         self.contrast = config.getint('PROCESSING','CONTRAST')
-        # self.rotationAngle = config.getfloat('QUICKLOOK','ROTATION_ANGLE')
-        self.rotationAngle = config.getfloat('CALIBRATION_PARAMS','THETA')
-        # self.rotationAngle = 0.
+        try:
+            self.rotationAngle = config.getfloat('CALIBRATION_PARAMS','THETA')
+        except configparser.NoOptionError:
+            self.rotationAngle = config.getfloat('QUICKLOOK','MANUAL_THETA')
+            logging.debug('Using Manual Rotation Angle: %s' % self.rotationAngle)
 
     def process_images(self, inputList, outputFile):
 
@@ -61,7 +63,6 @@ class QuickLook:
         cooked_image.equalizeHistogram(self.contrast)
         cooked_image.invertImage()
         cooked_image.rotateImage(self.rotationAngle)
-        # cooked_image.invertImage()
 
         start_time = datetime.datetime.utcfromtimestamp(image.attrs['start_time'])
         exposure_time = image.attrs['exposure_time']
