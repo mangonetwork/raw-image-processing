@@ -14,7 +14,7 @@ if sys.version_info < (3,9):
 else:
     from importlib import resources
 
-from MANGOImage import MANGOImage
+from .MANGOImage import MANGOImage
 
 
 class StarCal:
