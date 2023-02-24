@@ -1,20 +1,27 @@
 import warnings
 import configparser
+import logging
 
 from .MANGOImage import MANGOImage
 import argparse
 import re
-import pandas as pd
+# import pandas as pd
 # import pymap3d as pm
 import datetime as dt
 import numpy as np
 import h5py
+import sys
+import os
+from scipy.interpolate import griddata
+
+if sys.version_info < (3,9):
+    import importlib_resources as resources
+else:
+    from importlib import resources
 
 warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
-# Need docstrings throughout
 
-# PASSING ARGUMENTS vs class attributes???
 
 class ProcessImage:
 
@@ -23,44 +30,116 @@ class ProcessImage:
         self.outputFile = outputFile
 
         self.RE = 6371.0
-        self.calParams = {}
 
         self.read_config(configFile)
-        self.read_calfile()
+
+        self.get_time_independent_information(self.inputList[0])
+        self.create_transform_grids()
+        self.create_position_arrays()
+
+        self.atmosCorr = self.atmospheric_corrections()
+
         self.process_images()
         self.write_to_hdf5()
 
-    def read_config(self, configFile):
-        # read in config file
-        config = configparser.ConfigParser()
-        config.read(configFile)
+    def read_config(self, config):
 
         self.siteName = config.get('PROCESSING','SITE_NAME')
-        self.calFile = config.get('CALIBRATION','CALIBRATION_FILE')
-        self.calParams['contrast'] = config.getint('PROCESSING','CONTRAST')
-        # specify in config file
+        self.contrast = config.getint('PROCESSING','CONTRAST')
         self.newImax = config.getint('PROCESSING','NEWIMAX')
         self.newJmax = config.getint('PROCESSING','NEWJMAX')
-        # self.elevCutoff = config.getfloat('PROCESSING','ELEVCUTOFF')
-        # read from calibration file?
-        # self.targAlt = config.getfloat('PROCESSING','IMAGEALTITUDE')
+        self.elevCutoff = config.getfloat('PROCESSING','ELEVCUTOFF')
+        self.ha = config.getfloat('PROCESSING', 'ALTITUDE')
+
+        self.x0 = config.getfloat('CALIBRATION_PARAMS', 'X0')
+        self.y0 = config.getfloat('CALIBRATION_PARAMS', 'Y0')
+        self.rl = config.getfloat('CALIBRATION_PARAMS', 'RL')
+        self.theta = config.getfloat('CALIBRATION_PARAMS', 'THETA')
+        self.A = config.getfloat('CALIBRATION_PARAMS', 'A')
+        self.B = config.getfloat('CALIBRATION_PARAMS', 'B')
+        self.C = config.getfloat('CALIBRATION_PARAMS', 'C')
+        self.D = config.getfloat('CALIBRATION_PARAMS', 'D')
 
 
-    def read_calfile(self):
 
-        with h5py.File(self.calFile, 'r') as f:
-            self.calParams['transformedCoords'] = f['transformed_coords'][:]
-            self.calParams['atmosphericCorrection'] = f['atmos_corr'][:]
-            self.calParams['mask'] = f['mask'][:]
-            self.ha = f['altitude'][()]
-            self.elevCutoff = f['elevation_cutoff'][()]
-            # self.calParams['newIMatrix'] = f['New I array'][:]
-            # self.calParams['newJMatrix'] = f['New J array'][:]
-            # self.calParams['backgroundCorrection'] = f['Background Correction Array'][:]
-            # self.calParams['rotationAngle'] = f['Calibration Angle'][()]
-            # self.latitude = f['Latitude'][:]
-            # self.longitude = f['Longitude'][:]
-        # self.longitude[self.longitude<0.] +=360.
+    def create_transform_grids(self):
+
+        # Create a grid and find the transformed coordinates of each grid point
+        x_grid, y_grid = np.meshgrid(np.arange(self.Imax),np.arange(self.Jmax))
+        self.transXGrid, self.transYGrid = self.transform(x_grid, y_grid, self.x0, self.y0, self.rl, self.theta, self.A, self.B, self.C, self.D)
+
+        # Find unwarped distance to elevation cutoff and create new grid
+        d = self.unwarp(self.elevCutoff*np.pi/180.)
+        self.newXGrid, self.newYGrid = np.meshgrid(np.linspace(-d, d, self.newImax), np.linspace(-d, d, self.newJmax))
+
+
+    def transform(self, x, y, x0, y0, rl, theta, A, B, C, D, unwarp=True, return_elev=False):
+
+        x1 = (x - x0)/rl
+        y1 = (y - y0)/rl
+
+        t = theta*np.pi/180.
+        x2 = np.cos(t)*x1 - np.sin(t)*y1
+        y2 = np.sin(t)*x1 + np.cos(t)*y1
+
+        r = np.sqrt(x2**2+y2**2)
+        lam = A + B*r + C*r**2 + D*r**3
+        d = self.unwarp(lam)
+
+        x3 = d*x2/r
+        y3 = d*y2/r
+
+        return x3, y3
+
+    def unwarp(self, lam):
+        # Convert elevation angle to unwarped distance
+        b = np.arcsin(self.RE/(self.RE+self.ha)*np.sin(lam+np.pi/2))  # Law of Sines
+        psi = np.pi/2-lam-b
+        d = (self.RE+self.ha)*psi
+        return d
+
+
+
+    def create_position_arrays(self):
+
+        psi = np.sqrt(self.newXGrid**2 + self.newYGrid**2)/(self.RE+self.ha)
+        c = np.sqrt(self.RE**2 + (self.RE+self.ha)**2 - 2*self.RE*(self.RE+self.ha)*np.cos(psi))  # Law of Cosines
+        b = (self.RE+self.ha) - self.RE*np.cos(psi)
+        elv = np.pi/2. - np.arccos(b/c) - psi
+        azm = np.arctan2(self.newXGrid, self.newYGrid)
+        self.imageMask = elv<self.elevCutoff*np.pi/180.
+
+        # Use Haversine equations to find lat/lon of each point
+        lat = np.arcsin(np.sin(self.siteLat*np.pi/180.) * np.cos(psi) +
+                      np.cos(self.siteLat*np.pi/180.) * np.sin(psi) * np.cos(azm))
+        lon = self.siteLon*np.pi/180. + np.arctan2(np.sin(azm) * np.sin(psi) * np.cos(self.siteLat*np.pi/180.),
+                                      np.cos(psi) - np.sin(self.siteLat*np.pi/180.) * np.sin(lat))
+
+        self.azimuth = azm*180./np.pi
+        self.elevation = elv*180./np.pi
+        self.latitude = lat*180./np.pi
+        self.longitude = lon*180./np.pi
+
+
+    def atmospheric_corrections(self):
+        # Atmospheric corrections are taken from Kubota et al., 2001
+        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
+        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
+        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
+
+        # calculate zenith angle
+        za = np.pi/2-self.elevation*np.pi/180.
+
+        # Kubota et al., 2001; eqn. 6
+        vanRhijnFactor = np.sqrt(1.0 - np.sin(za)**2*(self.RE/(self.RE+self.ha))**2)
+
+        # Kubota et al., 2001; eqn. 7,8
+        a = 0.2
+        F = 1. / (np.cos(za) + 0.15 * (93.885 - za*180./np.pi) ** (-1.253))
+        extinctionFactor = 10.0 ** (0.4 * a * F)
+
+        return vanRhijnFactor * extinctionFactor
+
 
 
     def process_images(self):
@@ -69,29 +148,28 @@ class ProcessImage:
         self.ccdTemp = np.array([])
         self.rawList = self.inputList
         self.imageArrays = []
-        self.get_time_independent_information(self.rawList[0])
-        self.create_position_arrays()
         for file in self.rawList:
             print(file)
             with h5py.File(file, 'r') as hdf5_file:
                 imageData = hdf5_file['image'][:]
                 self.get_time_dependent_information(hdf5_file['image'])
-                # picture = MANGOimagehdf5.MANGOimage(hdf5_file['image'], self.calParams)
 
             image = MANGOImage(imageData)
-            image.equalizeHistogram(self.calParams['contrast'])
-            # self.showImage()
-            # self.setLensFunction()
-            # image.rotateImage(self.calParams['rotationAngle'])
-            # self.showImage()
-            # image.mercatorUnwrap(self.calParams['newIMatrix'], self.calParams['newJMatrix'], self.calParams['backgroundCorrection'])
-            image.transformImage(self.calParams['transformedCoords'], self.calParams['atmosphericCorrection'], self.calParams['mask'], self.pixelCoords)
-            image.applyMask(self.imageMask)
-            # self.showImage()
-            # self.writePNG()
-            # self.showImage()
+            image.equalizeHistogram(self.contrast)
 
-            self.imageArrays.append(image.imageData)
+            newImage = griddata((self.transXGrid.flatten(), self.transYGrid.flatten()), image.imageData.flatten(), (self.newXGrid, self.newYGrid), fill_value=0)
+
+            # The rest of these functions can possibly be moved outside the loop
+            # Atmospheric correction
+            newImage = newImage*self.atmosCorr
+
+            # Apply mask outside elevation cutoff
+            newImage[self.elevation<self.elevCutoff] = 0.
+
+            # Renormalize each image and convert to int
+            newImage = (newImage * 255 / np.nanmax(newImage)).astype('uint8')
+
+            self.imageArrays.append(newImage)
 
         self.imageArrays = np.array(self.imageArrays)
 
@@ -99,6 +177,8 @@ class ProcessImage:
     def get_time_independent_information(self, file):
         with h5py.File(file, 'r') as hdf5_file:
             data = hdf5_file['image']
+            self.Imax = data.attrs['width']
+            self.Jmax = data.attrs['height']
             self.code = data.attrs['station']
             self.siteLat = data.attrs['latitude']
             self.siteLon = data.attrs['longitude']
@@ -109,8 +189,7 @@ class ProcessImage:
             data_split = re.findall(r'-(\d+)-', file)[0]
             self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
 
-    # consider appending this in loop?
-    # Just a style preference
+
     def get_time_dependent_information(self, img):
         '''
         Obtains the following attributes:
@@ -126,106 +205,19 @@ class ProcessImage:
         self.ccdTemp = np.append(self.ccdTemp, img.attrs['ccd_temp'])
 
 
-    # def create_position_arrays(self):
-    #
-    #     i_grid, j_grid = np.meshgrid(np.arange(self.newImax),np.arange(self.newJmax))
-    #     RL = self.newJmax/2.
-    #     x_grid = (self.newImax/2.-i_grid)/RL
-    #     y_grid = (self.newJmax/2.-j_grid)/RL
-    #     r2_grid = x_grid**2 + y_grid**2
-    #     z_grid = np.sqrt(1. - r2_grid)
-    #
-    #     # Set mask based on elevation angle limit
-    #     r_cutoff = np.cos(self.elevCutoff*np.pi/180.)
-    #     self.imageMask = r2_grid > r_cutoff**2
-    #     x_grid[self.imageMask] = np.nan
-    #     y_grid[self.imageMask] = np.nan
-    #     z_grid[self.imageMask] = np.nan
-    #
-    #     self.azimuth = np.arctan2(x_grid, y_grid)*180./np.pi
-    #     self.elevation = np.arccos(np.sqrt(x_grid**2 + y_grid**2))*180./np.pi
-    #
-    #     x, y, z = pm.geodetic2ecef(self.site_lat, self.site_lon, 0.)
-    #     vx, vy, vz = pm.enu2uvw(x_grid, y_grid, z_grid, self.site_lat, self.site_lon)
-    #
-    #     earth = pm.Ellipsoid()
-    #     a2 = (earth.semimajor_axis + self.targAlt*1000.)**2
-    #     b2 = (earth.semimajor_axis + self.targAlt*1000.)**2
-    #     c2 = (earth.semiminor_axis + self.targAlt*1000.)**2
-    #
-    #     A = vx**2/a2 + vy**2/b2 + vz**2/c2
-    #     B = x*vx/a2 + y*vy/b2 + z*vz/c2
-    #     C = x**2/a2 + y**2/b2 + z**2/c2 -1
-    #
-    #     alpha = (np.sqrt(B**2-A*C)-B)/A
-    #
-    #     self.latitude, self.longitude, alt = pm.ecef2geodetic(x + alpha*vx, y + alpha*vy, z + alpha*vz)
-
-    def create_position_arrays(self):
-
-        transformedX = self.calParams['transformedCoords'][0][~self.calParams['mask']]
-        transformedY = self.calParams['transformedCoords'][1][~self.calParams['mask']]
-        newX = np.linspace(np.min(transformedX),np.max(transformedX), self.newImax)
-        newY = np.linspace(np.min(transformedY),np.max(transformedY), self.newJmax)
-
-        newXGrid, newYGrid = np.meshgrid(newX, newY)
-        self.pixelCoords = np.array([newXGrid,newYGrid])
-
-        psi = np.sqrt(newXGrid**2 + newYGrid**2)/(self.RE+self.ha)
-        c = np.sqrt(self.RE**2 + (self.RE+self.ha)**2 - 2*self.RE*(self.RE+self.ha)*np.cos(psi))  # Law of Cosines
-        b = (self.RE+self.ha) - self.RE*np.cos(psi)
-        elv = np.pi/2. - np.arccos(b/c) - psi
-        azm = np.arctan2(newXGrid, newYGrid)
-        self.imageMask = elv<self.elevCutoff*np.pi/180.
-
-        # Use Haversine equations to find lat/lon of each point
-        lat = np.arcsin(np.sin(self.siteLat*np.pi/180.) * np.cos(psi) +
-                      np.cos(self.siteLat*np.pi/180.) * np.sin(psi) * np.cos(azm))
-        lon = self.siteLon*np.pi/180. + np.arctan2(np.sin(azm) * np.sin(psi) * np.cos(self.siteLat*np.pi/180.),
-                                      np.cos(psi) - np.sin(self.siteLat*np.pi/180.) * np.sin(lat))
-
-        # import pymap3d as pm
-        # x, y, z = pm.geodetic2ecef(self.siteLat, self.siteLon, 0.)
-        # vx, vy, vz = pm.enu2uvw(np.cos(elv)*np.sin(azm), np.cos(elv)*np.cos(azm), np.sin(elv), self.siteLat, self.siteLon)
-        #
-        # earth = pm.Ellipsoid()
-        # a2 = (earth.semimajor_axis + self.ha*1000.)**2
-        # b2 = (earth.semimajor_axis + self.ha*1000.)**2
-        # c2 = (earth.semiminor_axis + self.ha*1000.)**2
-        #
-        # A = vx**2/a2 + vy**2/b2 + vz**2/c2
-        # B = x*vx/a2 + y*vy/b2 + z*vz/c2
-        # C = x**2/a2 + y**2/b2 + z**2/c2 -1
-        #
-        # alpha = (np.sqrt(B**2-A*C)-B)/A
-        #
-        # self.latitude, self.longitude, alt = pm.ecef2geodetic(x + alpha*vx, y + alpha*vy, z + alpha*vz)
-
-        self.azimuth = azm*180./np.pi
-        self.elevation = elv*180./np.pi
-        self.latitude = lat*180./np.pi
-        self.longitude = lon*180./np.pi
-
 
     def write_to_hdf5(self):
 
         self.endTime = self.startTime + self.exposureTime
-        # tstmp_s = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.startTime])
-        # tstmp_e = np.array([(t - dt.datetime.utcfromtimestamp(0)).total_seconds() for t in self.endTime])
-        tstmp_s = self.startTime
-        tstmp_e = self.endTime
 
         # save hdf5 file
         with h5py.File(self.outputFile, 'w') as f:
             f.create_group('SiteInfo')
 
-            T = f.create_dataset('UnixTime', data=np.array([tstmp_s, tstmp_e]), compression='gzip', compression_opts=1)
+            T = f.create_dataset('UnixTime', data=np.array([self.startTime, self.endTime]), compression='gzip', compression_opts=1)
             T.attrs['Description'] = 'unix time stamp'
             T.attrs['Unit'] = 'seconds'
 
-            # 250 km should be read in from somewhere - calibration file?
-            # this is associated with the locations of the latitude, so that would make sense
-            # Consider just copying array with attached attributes from calibration file?
             Lat = f.create_dataset('Latitude', data=self.latitude, compression='gzip', compression_opts=1)
             Lat.attrs['Description'] = 'geodetic latitude of each pixel'
             Lat.attrs['Size'] = 'Ipixels x Jpixels'
@@ -248,7 +240,7 @@ class ProcessImage:
             el.attrs['Size'] = 'Ipixels x Jpixels'
             el.attrs['Unit'] = 'degrees'
 
-            el = f.create_dataset('PixelCoordinates', data=self.pixelCoords, compression='gzip', compression_opts=1)
+            el = f.create_dataset('PixelCoordinates', data=np.array([self.newXGrid,self.newYGrid]), compression='gzip', compression_opts=1)
             el.attrs['Description'] = 'coordinates of each pixel in grid at the airglow altitude'
             el.attrs['Size'] = '2 (X,Y) x Ipixels x Jpixels'
             el.attrs['Unit'] = 'km'
@@ -276,31 +268,72 @@ class ProcessImage:
 
 
 def parse_args():
-    """
-    Handle the command line arguments.
-    Returns:
-    Output of argparse.ArgumentParser.parse_args.
-    """
 
-    parser = argparse.ArgumentParser(description='Accepting config, input files and output file'
-                                                 'to process MANGOImage.')
-    parser.add_argument('-c', '--config', dest='config', type=str,
-                        help='Config file containing data locations and image specs.')
-    parser.add_argument('-i', '--input', dest='inputs', nargs='+', type=str,
-                        help='A list of .hdf5 files to process and store in output file.')
-    parser.add_argument('-o', '--output', dest='output', type=str,
-                        help='Output file to write processed images to.')
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='Create a quick look movie')
 
-    return args
+    parser.add_argument('-c', '--config', metavar='FILE',
+                        help='Alternate configuration file')
+    parser.add_argument('-f', '--filelist', metavar='FILE',
+                        help='A file with a list of .hdf5 file names')
+    parser.add_argument('-o', '--output', default='mango.hdf5',
+                        help='Output filename (default is mango.hdf5)')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Verbose output')
 
+    parser.add_argument('inputfiles', nargs='*')
+
+    return parser.parse_args()
+
+def find_config(filename):
+
+    with h5py.File(filename) as h5:
+        station = h5['image'].attrs['station']
+        instrument = h5['image'].attrs['instrument']
+
+    name = '%s-%s.ini' % (station, instrument)
+
+    logging.debug('Using package configuration file: %s' % name)
+
+    return resources.files('mangonetwork.raw.data').joinpath(name).read_text()
 
 def main():
-    command_line_args = parse_args()
-    conf = command_line_args.config
-    inputs = command_line_args.inputs
-    output = command_line_args.output
-    ProcessImage(conf, inputs, output)
+
+    args = parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    if args.filelist:
+        inputs = [line.strip() for line in open(args.filelist)]
+        inputs = [line for line in inputs if line]
+    else:
+        inputs = args.inputfiles
+
+    if not inputs:
+        logging.error('No input files listed')
+        sys.exit(1)
+
+    logging.debug('Processing %d files' % len(inputs))
+
+    if args.config:
+        logging.debug('Alternate configuration file: %s' % args.config)
+        if not os.path.exists(args.config):
+            logging.error('Config file not found')
+            sys.exit(1)
+        contents = open(args.config).read()
+    else:
+        contents = find_config(inputs[0])
+
+    config = configparser.ConfigParser()
+    config.read_string(contents)
+
+    logging.debug('Configuration file: %s' % args.config)
+
+    ProcessImage(config, inputs, args.output)
+
+    sys.exit(0)
 
 if __name__ == '__main__':
     main()
