@@ -149,7 +149,7 @@ class ProcessImage:
         self.rawList = self.inputList
         self.imageArrays = []
         for file in self.rawList:
-            print(file)
+            logging.debug(file)
             with h5py.File(file, 'r') as hdf5_file:
                 imageData = hdf5_file['image'][:]
                 self.get_time_dependent_information(hdf5_file['image'])
@@ -208,7 +208,7 @@ class ProcessImage:
 
     def write_to_hdf5(self):
 
-        self.endTime = self.startTime + self.exposureTime
+        self.endTime = self.startTime + self.exposureTime.astype('float64')
 
         # save hdf5 file
         with h5py.File(self.outputFile, 'w') as f:
@@ -329,7 +329,8 @@ def main():
     config = configparser.ConfigParser()
     config.read_string(contents)
 
-    logging.debug('Configuration file: %s' % args.config)
+    if args.config:
+        logging.debug('Configuration file: %s' % args.config)
 
     ProcessImage(config, inputs, args.output)
 
