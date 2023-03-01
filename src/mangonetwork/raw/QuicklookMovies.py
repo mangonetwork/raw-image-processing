@@ -22,16 +22,20 @@ else:
 
 class QuickLook:
 
-    def __init__(self, config, inputList, outputFile):
+    def __init__(self, config, inputList, args):
+
+        self.args = args
+        self.outputFile = pathlib.Path(args.output)
 
         self.load_config(config)
-        self.process_images(inputList, outputFile)
+        self.process_images(inputList, self.outputFile)
 
     def load_config(self, config):
 
         self.siteName = config.get('PROCESSING','SITE_NAME')
         self.siteState = config.get('PROCESSING','SITE_STATE')
         self.contrast = config.getint('PROCESSING','CONTRAST')
+
         try:
             self.rotationAngle = config.getfloat('CALIBRATION_PARAMS','THETA')
         except configparser.NoOptionError:
@@ -40,10 +44,7 @@ class QuickLook:
 
     def process_images(self, inputList, outputFile):
 
-        outputFile = os.path.abspath(outputFile)
-        outputPath = os.path.split(outputFile)[0]
-
-        pathlib.Path(outputPath).mkdir(parents=True, exist_ok=True)
+        outputPath.parents.mkdir(parents=True, exist_ok=True)
 
         imageWriter = hcipy.plotting.FFMpegWriter(outputFile, framerate = 10)
 
@@ -165,7 +166,7 @@ def main():
 
     logging.debug('Configuration file: %s' % args.config)
 
-    QuickLook(config, inputs, args.output)
+    QuickLook(config, inputs, args)
 
     sys.exit(0)
 
