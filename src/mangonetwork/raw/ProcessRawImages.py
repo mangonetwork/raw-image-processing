@@ -1,19 +1,17 @@
-import warnings
+#!/usr/bin/env python3
+
+import argparse
 import configparser
 import logging
+import pathlib
+import os
+import sys
+
+import h5py
+import numpy as np
+from scipy.interpolate import griddata
 
 from .MANGOImage import MANGOImage
-import argparse
-import re
-# import pandas as pd
-# import pymap3d as pm
-import datetime as dt
-import numpy as np
-import h5py
-import sys
-import os
-import pathlib
-from scipy.interpolate import griddata
 
 if sys.version_info < (3,9):
     import importlib_resources as resources
