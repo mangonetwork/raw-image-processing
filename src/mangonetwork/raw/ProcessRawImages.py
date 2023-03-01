@@ -12,6 +12,7 @@ import numpy as np
 import h5py
 import sys
 import os
+import pathlib
 from scipy.interpolate import griddata
 
 if sys.version_info < (3,9):
@@ -25,9 +26,10 @@ warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
 
 class ProcessImage:
 
-    def __init__(self, configFile, inputList, outputFile):
+    def __init__(self, configFile, inputList, args):
         self.inputList = inputList
-        self.outputFile = outputFile
+        self.outputFile = pathlib.Path(args.output)
+        self.args = args
 
         self.RE = 6371.0
 
@@ -148,11 +150,17 @@ class ProcessImage:
         self.ccdTemp = np.array([])
         self.rawList = self.inputList
         self.imageArrays = []
+
         for file in self.rawList:
             logging.debug(file)
             with h5py.File(file, 'r') as hdf5_file:
                 imageData = hdf5_file['image'][:]
                 self.get_time_dependent_information(hdf5_file['image'])
+
+            if self.shape != imageData.shape:
+                if self.args.skipbad:
+                    continue
+                raise ValueError('Image shape has changed')
 
             image = MANGOImage(imageData)
             image.equalizeHistogram(self.contrast)
@@ -177,6 +185,7 @@ class ProcessImage:
     def get_time_independent_information(self, file):
         with h5py.File(file, 'r') as hdf5_file:
             data = hdf5_file['image']
+            self.shape = data.shape
             self.Imax = data.attrs['width']
             self.Jmax = data.attrs['height']
             self.code = data.attrs['station']
@@ -209,6 +218,8 @@ class ProcessImage:
     def write_to_hdf5(self):
 
         self.endTime = self.startTime + self.exposureTime.astype('float64')
+
+        self.outputFile.parent.mkdir(parents=True, exist_ok=True)
 
         # save hdf5 file
         with h5py.File(self.outputFile, 'w') as f:
@@ -277,6 +288,8 @@ def parse_args():
                         help='A file with a list of .hdf5 file names')
     parser.add_argument('-o', '--output', default='mango.hdf5',
                         help='Output filename (default is mango.hdf5)')
+    parser.add_argument('-s', '--skipbad', action='store_true',
+                        help='Skip bad files (wrong size, etc')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='Verbose output')
 
@@ -332,7 +345,7 @@ def main():
     if args.config:
         logging.debug('Configuration file: %s' % args.config)
 
-    ProcessImage(config, inputs, args.output)
+    ProcessImage(config, inputs, args)
 
     sys.exit(0)
 
