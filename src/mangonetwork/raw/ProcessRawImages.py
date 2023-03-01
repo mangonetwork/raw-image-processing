@@ -20,9 +20,6 @@ if sys.version_info < (3,9):
 else:
     from importlib import resources
 
-warnings.filterwarnings("ignore", message="Reloaded modules: MANGOimage")
-
-
 
 class ProcessImage:
 
@@ -194,9 +191,6 @@ class ProcessImage:
             self.bin_x = data.attrs['bin_x']
             self.bin_y = data.attrs['bin_y']
             self.label = data.attrs['label']
-            # get this from starttime rather than file name?
-            data_split = re.findall(r'-(\d+)-', file)[0]
-            self.siteDate = dt.datetime.strptime(data_split, '%Y%m%d').date()
 
 
     def get_time_dependent_information(self, img):
