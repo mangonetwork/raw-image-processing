@@ -2,6 +2,7 @@
 
 import argparse
 import configparser
+import datetime
 import logging
 import pathlib
 import os
@@ -37,7 +38,10 @@ class ProcessImage:
         self.atmosCorr = self.atmospheric_corrections()
 
         self.process_images()
+        logging.debug('Processing finished')
         self.write_to_hdf5()
+
+        logging.debug('Wrote output file') 
 
     def read_config(self, config):
 
@@ -137,6 +141,12 @@ class ProcessImage:
 
         return vanRhijnFactor * extinctionFactor
 
+    def log_elapsed(self, msg):
+        if self.args.verbose > 1:
+            now = datetime.datetime.now()
+            elapsed = now - self.time_mark
+            logging.debug('  - %s (%s)' % (msg, elapsed))
+            self.time_mark = now
 
 
     def process_images(self):
@@ -148,9 +158,12 @@ class ProcessImage:
 
         for file in self.rawList:
             logging.debug(file)
+            self.time_mark = datetime.datetime.now() 
+
             with h5py.File(file, 'r') as hdf5_file:
                 imageData = hdf5_file['image'][:]
                 self.get_time_dependent_information(hdf5_file['image'])
+                self.log_elapsed('loaded file')
 
             if self.shape != imageData.shape:
                 if self.args.skipbad:
@@ -158,21 +171,29 @@ class ProcessImage:
                 raise ValueError('Image shape has changed')
 
             image = MANGOImage(imageData)
+            self.log_elapsed('created MANGOImage')
             image.equalizeHistogram(self.contrast)
+            self.log_elapsed('equalized histrogram')
 
             newImage = griddata((self.transXGrid.flatten(), self.transYGrid.flatten()), image.imageData.flatten(), (self.newXGrid, self.newYGrid), fill_value=0)
+
+            self.log_elapsed('gridded data')
 
             # The rest of these functions can possibly be moved outside the loop
             # Atmospheric correction
             newImage = newImage*self.atmosCorr
+            self.log_elapsed('applied atmospheric correction')
 
             # Apply mask outside elevation cutoff
             newImage[self.elevation<self.elevCutoff] = 0.
+            self.log_elapsed('masked elevation')
 
             # Renormalize each image and convert to int
             newImage = (newImage * 255 / np.nanmax(newImage)).astype('uint8')
+            self.log_elapsed('renormalized')
 
             self.imageArrays.append(newImage)
+            self.log_elapsed('appended to image array')
 
         self.imageArrays = np.array(self.imageArrays)
 
@@ -186,8 +207,6 @@ class ProcessImage:
             self.code = data.attrs['station']
             self.siteLat = data.attrs['latitude']
             self.siteLon = data.attrs['longitude']
-            self.bin_x = data.attrs['bin_x']
-            self.bin_y = data.attrs['bin_y']
             self.label = data.attrs['label']
 
 
@@ -252,7 +271,6 @@ class ProcessImage:
             I.attrs['Description'] = 'pixel values for images'
             I.attrs['Site Abbreviation'] = self.code
             I.attrs['Image label'] = self.label
-            # I.attrs['x/y binning'] = np.array([self.bin_x, self.bin_y])
 
             M = f.create_dataset('Mask', data=self.imageMask, compression='gzip', compression_opts=1)
             M.attrs['Description'] = 'image mask'
@@ -282,8 +300,8 @@ def parse_args():
                         help='Output filename (default is mango.hdf5)')
     parser.add_argument('-s', '--skipbad', action='store_true',
                         help='Skip bad files (wrong size, etc')
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        help='Verbose output')
+    parser.add_argument('-v', '--verbose', action='count', default=0,
+                        help='Verbose output (repeat for more detail)')
 
     parser.add_argument('inputfiles', nargs='*')
 
@@ -305,10 +323,12 @@ def main():
 
     args = parse_args()
 
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+    fmt = '[%(asctime)s] %(levelname)s %(message)s'
+
+    if args.verbose>0:
+        logging.basicConfig(format=fmt, level=logging.DEBUG)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(format=fmt, level=logging.INFO)
 
     if args.filelist:
         inputs = [line.strip() for line in open(args.filelist)]
