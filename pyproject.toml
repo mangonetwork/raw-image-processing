@@ -1,3 +1,68 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=61/0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+
+name = "mangonetwork-raw"
+dynamic = ["version"]
+description = "MANGO network raw image processing"
+readme = "README.md"
+requires-python = ">= 3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name='Asti Bhatt', email='asti.bhatt@sri.com' },
+    { name='Leslie Lamarche', email='leslie.lamarche@sri.com' },
+    { name='Todd Valentic', email='todd.valentic@gmail.com' }
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent"
+]
+
+dependencies = [
+    "numpy",
+    "scipy",
+    "scikit-image",
+    "h5py",
+    "pandas",
+    "matplotlib",
+    "hcipy",
+    "importlib_resources>1.3; python_version < '3.10'"
+]
+
+[project.optional-dependencies]
+test = [
+    'pytest',
+    'pyfakefs',
+    'pylint',
+    'black'
+]
+devel = [
+    'build'
+]
+
+[project.urls]
+homepage="https://www.mangonetwork.org"
+repository="https://github.com/mangonetwork/raw-image-processing"
+
+[project.scripts]
+    mango-process-raw-images = "mangonetwork.raw.process_raw_images:main"
+    mango-calibrate = "mangonetwork.raw.calibrate:main"
+    mango-keograms = "mangonetwork.raw.keograms:main"
+    mango-quicklook-movies = "mangonetwork.raw.quicklook_movies:main"
+    mango-starcal = "mangonetwork.raw.starcal:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "mangonetwork.raw.__version__"}
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib"
+]
+

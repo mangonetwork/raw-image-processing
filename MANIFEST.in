@@ -1,3 +1,4 @@
-include CHANGES LICENSE
-graft data
+include CHANGES LICENSE INSTRUCTIONS.txt
 global-exclude *.pyc
+graft src/mangonetwork/raw/data
+graft data
