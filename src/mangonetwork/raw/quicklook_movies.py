@@ -165,6 +165,20 @@ def find_config(filename):
     return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
 
 
+def find_inputfiles(args):
+    """Find input filenames"""
+
+    if args.filelist:
+        with open(args.filelist, encoding="utf-8") as f:
+            filenames = [line.strip() for line in f]
+            # filter blank lines
+            filenames = [line for line in filenames if line]
+    else:
+        filenames = args.inputfiles
+
+    return [filename for filename in filenames if os.path.exists(filename)]
+
+
 def main():
     """Main application"""
 
@@ -175,12 +189,7 @@ def main():
     else:
         logging.basicConfig(level=logging.INFO)
 
-    if args.filelist:
-        with open(args.filelist, encoding="utf-8") as f:
-            inputs = [line.strip() for line in f]
-            inputs = [line for line in inputs if line]  # filter blank lines
-    else:
-        inputs = args.inputfiles
+    inputs = find_inputfiles(args)
 
     if not inputs:
         logging.error("No input files listed")
