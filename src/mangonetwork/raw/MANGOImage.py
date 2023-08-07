@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
-#######################################################################
+##########################################################################
 #
 #   Image Processing Core Engine for MANGO
 #   (Midlatitude All-sky-imager Network for Geophysical Observation)
+#
 #   2013-01-23  Rohit Mundra
 #               Initial implementation
 #
@@ -18,9 +19,10 @@
 #   2013-02-22  Fabrice Kengne
 #               Adding compatibility for FITS read
 #
-# 2014-10-25  Asti Bhatt
-# Adding compatibility for BU software generated .153 files
-#######################################################################
+#   2014-10-25  Asti Bhatt
+#               Adding compatibility for BU software generated .153 files
+#
+##########################################################################
 
 # script containing image manipulation functions for processing and quicklooks
 
@@ -90,25 +92,36 @@ class MANGOImage:
         self.imageData = np.reshape(
             griddata((iKnown, jKnown), valuesKnown, (iAll, jAll), method='linear', fill_value=0), filteredData.shape)
 
+    # Create flip image function???
+    # This doesn't reduce code really, but it will make the under/above inversion more explicit/easier to understand
+    def invertImage(self):
+        # self.imageData = np.fliplr(self.imageData)
+        self.imageData = np.flipud(self.imageData)
 
     def rotateImage(self, angle):
-        self.imageData = np.fliplr(skimage.transform.rotate(self.imageData,
-                                                            angle, order=3)).astype(float)
+        # self.imageData = skimage.transform.rotate(np.fliplr(self.imageData),
+                                                            # angle, order=3).astype(float)
+        self.imageData = skimage.transform.rotate(self.imageData, angle, order=3).astype(float)
 
+# MUST flip image before rotating
+# Images are captured from below, but visualized from above in most standard formats
 
-    def transformImage(self, transformedCoords, atmosphericCorrection, mask, newCoords):
+    # def transformImage(self, transformedCoords, atmosphericCorrection, mask, newCoords):
+    def transformImage(self, transformedCoords, newCoords):
         # Interpolate the transformed coordinates to new (regular grid) coordinates.  This takes care of all
         #   traslation/rotation/unwarping required to create a fully calibrated image.
         #   Also apply atmospheric corrections.
 
-        img_corr = self.imageData*atmosphericCorrection
+        # img_corr = self.imageData*atmosphericCorrection
+        img_corr = self.imageData
         xt_grid = transformedCoords[0]
         yt_grid = transformedCoords[1]
 
         x_grid = newCoords[0]
         y_grid = newCoords[1]
 
-        interpolatedData = griddata((xt_grid[~mask], yt_grid[~mask]), img_corr[~mask], (x_grid, y_grid), fill_value=0)
+        # interpolatedData = griddata((xt_grid[~mask], yt_grid[~mask]), img_corr[~mask], (x_grid, y_grid), fill_value=0)
+        interpolatedData = griddata((xt_grid.flatten(), yt_grid.flatten()), img_corr.flatten(), (x_grid, y_grid), fill_value=0)
 
         interpolatedData = (interpolatedData * 255 / (np.nanmax(interpolatedData)))
         self.imageData = interpolatedData.astype('uint8')

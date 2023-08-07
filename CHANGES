@@ -1,0 +1,7 @@
+2022-03-24  Leslie Lamarche 
+            Initial test release
+
+2022-04-21  Todd Valentic
+            Refactor QuicklookMovies
+            Move into mangonetwork.raw package namespace
+            Add in package data files

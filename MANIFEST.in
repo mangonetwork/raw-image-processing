@@ -1,1 +1,3 @@
-
+include CHANGES LICENSE
+graft data
+global-exclude *.pyc
