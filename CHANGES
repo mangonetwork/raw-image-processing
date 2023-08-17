@@ -5,3 +5,20 @@
             Refactor QuicklookMovies
             Move into mangonetwork.raw package namespace
             Add in package data files
+
+2022-06-29  Todd Valentic
+            Fix image size to fill full space (no blank axes)
+            Release 1.0.2
+
+2022-08-18  Todd Valentic
+            Add place holder configuration for PAR 
+            Release 1.0.3
+
+2023-02-24  Todd Valentic and Leslie Lamarche
+            Integrate new processed image code
+            Release 1.2.0
+
+2023-03-07  Todd Valentic
+            Parallelize processing code
+            Make processing code and names PEP8 compliant
+            Release 1.2.1
