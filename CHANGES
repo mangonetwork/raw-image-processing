@@ -22,3 +22,15 @@
             Parallelize processing code
             Make processing code and names PEP8 compliant
             Release 1.2.1
+
+2023-04-26  Todd Valentic
+            Add manual rotation config files for:
+                cfs-greenline
+                cvo-redline
+                eio-redline
+                mdk-redline
+                bdr-greenline
+                mro-greenline
+                mto-redline
+                par-redline
+            Release 1.2.2
