@@ -13,6 +13,7 @@
 #
 ##########################################################################
 
+import datetime as dt
 import argparse
 import io
 import logging
@@ -38,24 +39,20 @@ else:
 class StarCal:
     """Star calibration"""
 
-    def __init__(self, starCalFile, output):
+    def __init__(self, star_cal_file, output):
 
-        #self.load_image()
-        self.display_image(starCalFile)
+        self.display_image(star_cal_file)
         self.lookup_stars()
-        self.save_starcal_file(output, starCalFile)
-        #self.plot_stars(starCalFile)
+        self.save_starcal_file(output, star_cal_file)
 
-    def add_star(self, position: Tuple[float, float], klass: str):
+    def add_star(self, position, klass):
         x, y = position
         print(f"Star at {x=:02f}, {y=:02f}")
         hip = input('HIP #: ')
         self.star_hip.append(hip)
 
-    def prep_image(self, image):
-
-        contrast = 99.95
-        rotationAngle = 0.
+    def prep_image(self, image, contrast=99.95, rotation_angle=0.):
+        """Prepare image to display"""
 
         cooked_image = np.array(image)
         cooked_image = imageops.equalize(cooked_image, contrast)
@@ -64,22 +61,12 @@ class StarCal:
         return cooked_image
 
 
-    def display_image(self, starCalFile):
+    def display_image(self, star_cal_file):
+        """Display image and set up klicker"""
 
-        az, el, i, j, raw_file = self.parse_file(starCalFile)
-        #el = el*np.pi/180.
-        #az = az*np.pi/180.
-
-
-        # Function prepare_image() ?
-        #contrast = 99.95
-        #rotationAngle = 0.
+        az, el, i, j, raw_file = self.parse_file(star_cal_file)
 
         image = h5py.File(raw_file, 'r')['image']
-
-        #cooked_image = MANGOImage(np.array(image))
-        #cooked_image.equalizeHistogram(contrast)
-        #cooked_image.rotateImage(rotationAngle)
         cooked_image = self.prep_image(image)
 
         self.time = dt.datetime.utcfromtimestamp(image.attrs['start_time'])
@@ -89,19 +76,12 @@ class StarCal:
         # Display image with stars
         fig = plt.figure(figsize=(15,10))
         ax = fig.add_subplot(111)
-        ax.imshow(cooked_image.imageData, cmap='gray')
+        ax.imshow(cooked_image, cmap='gray')
         ax.scatter(i, j, facecolors='none', edgecolors='r')
 
         # Setup clicker object to keep track of identified stars
         self.klicker = clicker(ax, ['stars'])
         self.star_hip = list()
-
-#        def point_added_cb(position: Tuple[float, float], klass: str):
-#            x, y = position
-#            print(f"Star at {x=:02f}, {y=:02f}")
-#            hip = input('HIP #: ')
-#            stars.append(hip)
-
         self.klicker.on_point_added(self.add_star)
 
         plt.show()
@@ -109,8 +89,8 @@ class StarCal:
         self.star_pos = self.klicker.get_positions()['stars']
        
 
-        # Function lookup_star() ?
     def lookup_stars(self):
+        """Look up star position"""
         ts = load.timescale()
         t = ts.utc(self.time.year,self.time.month,self.time.day,self.time.hour,self.time.minute,self.time.second)
         planets = load('de421.bsp')
@@ -127,33 +107,25 @@ class StarCal:
 
             elev, azmt, _ = site_ref.observe(s).apparent().altaz()
             self.star_azel.append([azmt.degrees, elev.degrees])
-            #print(hip, elev.degrees, azmt.degrees)
 
 
-        # Need to append output to starcalfile
-        # may be tricky as this is currently treated as package data
+    def save_starcal_file(self, output, star_cal_file):
+        """ Save output starcal file"""
 
-    def save_starcal_file(self, output, starCalFile):
-        # Save to seperate output file
-        # Copy existing stars and add new
+        with open(output, 'w') as f:
+            # copy existing file
+            f.write(star_cal_file)
 
-        with open(output, 'r') as f:
-            f.write(starCalFile)
-
-        #with open(starCalFile, 'a') as f:
+            # add new stars
             for hip, azel, pos in zip(self.star_hip, self.star_azel, self.star_pos):
                 f.write(f'{hip}    {azel[0]}    {azel[1]}    {pos[0]}    {pos[1]}\n')
 
-    def parse_file(self, starCalFile):
+    def parse_file(self, star_cal_file):
         """Read starcal file"""
 
-        #with open(starCalFile, 'r') as f:
-        #    line = f.readline()
-        #    raw_filename = line.split()[-1]
-        raw_filename = starCalFile.split('\n')[0].split()[-1]
+        raw_filename = star_cal_file.split('\n')[0].split()[-1]
 
-        #az, el, i, j = np.loadtxt(starCalFile, usecols=(1,2,3,4), unpack=True)
-        az, el, i, j = np.loadtxt(io.StringIO(starCalFile), usecols=(1,2,3,4), unpack=True)
+        az, el, i, j = np.loadtxt(io.StringIO(star_cal_file), usecols=(1,2,3,4), unpack=True)
 
         return az, el, i, j, raw_filename
 

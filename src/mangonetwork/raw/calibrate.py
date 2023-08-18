@@ -122,7 +122,7 @@ class Calibrate:
         """Save results"""
 
         config = configparser.ConfigParser()
-        config.read(config_file)
+        config.read_string(config_file)
 
         config.set("CALIBRATION_PARAMS", "X0", str(self.x0))
         config.set("CALIBRATION_PARAMS", "Y0", str(self.y0))
@@ -170,20 +170,10 @@ def parse_args():
 def find_config(station, instrument):
     """Find configuration file from pacakge data"""
 
-    # NOTE: Because we need to write the configuration parameters to the config file
-    #   after they are calculated by the calibration class, we cannot use the standard
-    #   package resource approach here.  Instead, find the absolute path to the config
-    #   file.
-
-    path = os.path.dirname(__file__)
-
     config_file = f"{station}-{instrument}.ini"
 
     logging.debug("Using package configuration file: %s", config_file)
 
-    #full_path = os.path.join(path, "data", config_file)
-
-    #return full_path
     return resources.files('mangonetwork.raw.data').joinpath(config_file).read_text()
 
 
@@ -214,7 +204,6 @@ def main():
         if not os.path.exists(args.config):
             logging.error("Config file not found")
             sys.exit(1)
-        #config_path = args.config
         with open(args.config, encoding="utf-8") as f:
             config_contents = f.read()
     else:
