@@ -22,6 +22,10 @@ import sys
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_point_clicker import clicker
+
+from skyfield.api import Star, load, wgs84
+from skyfield.data import hipparcos
 
 from . import imageops
 
@@ -34,42 +38,125 @@ else:
 class StarCal:
     """Star calibration"""
 
-    def __init__(self, starcal_file):
-        self.plot_stars(starcal_file)
+    def __init__(self, starCalFile, output):
 
-    def plot_stars(self, starcal_file):
-        """Plot stars"""
+        #self.load_image()
+        self.display_image(starCalFile)
+        self.lookup_stars()
+        self.save_starcal_file(output, starCalFile)
+        #self.plot_stars(starCalFile)
 
-        az, el, i, j, raw_file = self.parse_file(starcal_file)
-        el = el * np.pi / 180.0
-        az = az * np.pi / 180.0
+    def add_star(self, position: Tuple[float, float], klass: str):
+        x, y = position
+        print(f"Star at {x=:02f}, {y=:02f}")
+        hip = input('HIP #: ')
+        self.star_hip.append(hip)
+
+    def prep_image(self, image):
 
         contrast = 99.95
-        rotation_angle = 0.0
-
-        image = h5py.File(raw_file, "r")["image"]
+        rotationAngle = 0.
 
         cooked_image = np.array(image)
         cooked_image = imageops.equalize(cooked_image, contrast)
         cooked_image = imageops.rotate(cooked_image, rotation_angle)
 
-        fig = plt.figure(figsize=(15, 10))
+        return cooked_image
+
+
+    def display_image(self, starCalFile):
+
+        az, el, i, j, raw_file = self.parse_file(starCalFile)
+        #el = el*np.pi/180.
+        #az = az*np.pi/180.
+
+
+        # Function prepare_image() ?
+        #contrast = 99.95
+        #rotationAngle = 0.
+
+        image = h5py.File(raw_file, 'r')['image']
+
+        #cooked_image = MANGOImage(np.array(image))
+        #cooked_image.equalizeHistogram(contrast)
+        #cooked_image.rotateImage(rotationAngle)
+        cooked_image = self.prep_image(image)
+
+        self.time = dt.datetime.utcfromtimestamp(image.attrs['start_time'])
+        self.site_lat = image.attrs['latitude']
+        self.site_lon = image.attrs['longitude']
+
+        # Display image with stars
+        fig = plt.figure(figsize=(15,10))
         ax = fig.add_subplot(111)
-        ax.imshow(cooked_image.imageData, cmap="gray")
-        ax.scatter(i, j, facecolors="none", edgecolors="r")
+        ax.imshow(cooked_image.imageData, cmap='gray')
+        ax.scatter(i, j, facecolors='none', edgecolors='r')
+
+        # Setup clicker object to keep track of identified stars
+        self.klicker = clicker(ax, ['stars'])
+        self.star_hip = list()
+
+#        def point_added_cb(position: Tuple[float, float], klass: str):
+#            x, y = position
+#            print(f"Star at {x=:02f}, {y=:02f}")
+#            hip = input('HIP #: ')
+#            stars.append(hip)
+
+        self.klicker.on_point_added(self.add_star)
 
         plt.show()
 
-    def parse_file(self, starcal_file):
+        self.star_pos = self.klicker.get_positions()['stars']
+       
+
+        # Function lookup_star() ?
+    def lookup_stars(self):
+        ts = load.timescale()
+        t = ts.utc(self.time.year,self.time.month,self.time.day,self.time.hour,self.time.minute,self.time.second)
+        planets = load('de421.bsp')
+        earth = planets['earth']
+        site = earth + wgs84.latlon(self.site_lat, self.site_lon, elevation_m=0)
+        site_ref = site.at(t)
+
+        with load.open(hipparcos.URL) as f:
+            df = hipparcos.load_dataframe(f)
+
+        self.star_azel = list()
+        for hip in self.star_hip:
+            s = Star.from_dataframe(df.loc[float(hip)])
+
+            elev, azmt, _ = site_ref.observe(s).apparent().altaz()
+            self.star_azel.append([azmt.degrees, elev.degrees])
+            #print(hip, elev.degrees, azmt.degrees)
+
+
+        # Need to append output to starcalfile
+        # may be tricky as this is currently treated as package data
+
+    def save_starcal_file(self, output, starCalFile):
+        # Save to seperate output file
+        # Copy existing stars and add new
+
+        with open(output, 'r') as f:
+            f.write(starCalFile)
+
+        #with open(starCalFile, 'a') as f:
+            for hip, azel, pos in zip(self.star_hip, self.star_azel, self.star_pos):
+                f.write(f'{hip}    {azel[0]}    {azel[1]}    {pos[0]}    {pos[1]}\n')
+
+    def parse_file(self, starCalFile):
         """Read starcal file"""
 
-        raw_filename = starcal_file.split("\n")[0].split()[-1]
+        #with open(starCalFile, 'r') as f:
+        #    line = f.readline()
+        #    raw_filename = line.split()[-1]
+        raw_filename = starCalFile.split('\n')[0].split()[-1]
 
-        az, el, i, j = np.loadtxt(
-            io.StringIO(starcal_file), usecols=(1, 2, 3, 4), unpack=True
-        )
+        #az, el, i, j = np.loadtxt(starCalFile, usecols=(1,2,3,4), unpack=True)
+        az, el, i, j = np.loadtxt(io.StringIO(starCalFile), usecols=(1,2,3,4), unpack=True)
 
         return az, el, i, j, raw_filename
+
 
 
 # ------------------------------------------------------------------------
@@ -88,7 +175,13 @@ def parse_args():
     parser.add_argument("instrument", help="redline or greenline")
 
     parser.add_argument(
-        "-s", "--starcal", metavar="FILE", help="Alternate starcal file"
+        "-sc", "--starcal", metavar="FILE", help="Alternate starcal file"
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="starcal-mango.txt",
+        help="Output starcal filename (default is starcal-mango.txt)",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
@@ -125,7 +218,7 @@ def main():
     else:
         contents = find_starcal(args.station, args.instrument)
 
-    StarCal(contents)
+    StarCal(contents, args.output)
 
     sys.exit(0)
 
