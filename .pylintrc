@@ -1,0 +1,17 @@
+[BASIC]
+  
+# Allow for names < 3 characters (including caps)
+good-names-rgxs=^[_a-zA-Z][_a-z0-9]?$
+
+# Project specific
+good-names=REha
+
+# Allow classes with few methods
+min-public-methods=0
+
+[DESIGN]
+max-parents=15
+
+[MESSAGES CONTROL]
+disable=
+    too-many-instance-attributes
