@@ -238,7 +238,7 @@ class ImageProcessor:
         elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
 
         cooked_image = np.array(raw_image)
-        cooked_image = imageops.equalize(cooked_image, contrast)
+        #cooked_image = imageops.equalize(cooked_image, contrast)
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
@@ -247,17 +247,17 @@ class ImageProcessor:
             fill_value=0,
         )
 
-        # Apply atmopsheric correction
+        ## Apply atmopsheric correction
 
-        new_image = self.atmospheric_correction(new_image)
+        #new_image = self.atmospheric_correction(new_image)
 
         # Apply mask outside elevation cutoff
 
         new_image[self.elevation < elev_cutoff] = 0.0
 
-        # Renormalize each image and convert to int
+        ## Renormalize each image and convert to int
 
-        new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
+        #new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
         return new_image
 
