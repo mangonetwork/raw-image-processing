@@ -33,9 +33,9 @@ else:
 class Calibrate:
     """Camera calibration"""
 
-    def __init__(self, config_file, starcal_file):
+    def __init__(self, config_file, starcal_file, output):
         self.find_calibration_params(starcal_file)
-        self.save_calibration_params(config_file)
+        self.save_calibration_params(output, config_file)
 
     def find_calibration_params(self, starcal_file):
         """Load calibration parameters from starcal file"""
@@ -118,11 +118,11 @@ class Calibrate:
 
         return [x0, y0, rl, theta, C, D]
 
-    def save_calibration_params(self, config_file):
+    def save_calibration_params(self, output, config_file):
         """Save results"""
 
         config = configparser.ConfigParser()
-        config.read(config_file)
+        config.read_string(config_file)
 
         config.set("CALIBRATION_PARAMS", "X0", str(self.x0))
         config.set("CALIBRATION_PARAMS", "Y0", str(self.y0))
@@ -133,7 +133,7 @@ class Calibrate:
         config.set("CALIBRATION_PARAMS", "C", str(self.C))
         config.set("CALIBRATION_PARAMS", "D", str(self.D))
 
-        with open(config_file, "w", encoding="utf-8") as cf:
+        with open(output, "w", encoding="utf-8") as cf:
             config.write(cf)
 
 
@@ -156,6 +156,12 @@ def parse_args():
     parser.add_argument(
         "-sc", "--starcal", metavar="FILE", help="Alternate starcal file"
     )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default="mango-config.ini",
+        help="Output configuration filename (default is mango-config.ini)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
 
     return parser.parse_args()
@@ -164,21 +170,11 @@ def parse_args():
 def find_config(station, instrument):
     """Find configuration file from pacakge data"""
 
-    # NOTE: Because we need to write the configuration parameters to the config file
-    #   after they are calculated by the calibration class, we cannot use the standard
-    #   package resource approach here.  Instead, find the absolute path to the config
-    #   file.
-
-    path = os.path.dirname(__file__)
-
     config_file = f"{station}-{instrument}.ini"
 
     logging.debug("Using package configuration file: %s", config_file)
 
-    full_path = os.path.join(path, "data", config_file)
-
-    return full_path
-    # return resources.files('mangonetwork.raw.data').joinpath(config_file).read_text()
+    return resources.files('mangonetwork.raw.data').joinpath(config_file).read_text()
 
 
 def find_starcal(station, instrument):
@@ -208,9 +204,10 @@ def main():
         if not os.path.exists(args.config):
             logging.error("Config file not found")
             sys.exit(1)
-        config_path = args.config
+        with open(args.config, encoding="utf-8") as f:
+            config_contents = f.read()
     else:
-        config_path = find_config(args.station, args.instrument)
+        config_contents = find_config(args.station, args.instrument)
 
     if args.starcal:
         logging.debug("Alternate starcal file: %s", args.starcal)
@@ -222,7 +219,7 @@ def main():
     else:
         starcal_contents = find_starcal(args.station, args.instrument)
 
-    Calibrate(config_path, starcal_contents)
+    Calibrate(config_contents, starcal_contents, args.output)
 
     sys.exit(0)
 
