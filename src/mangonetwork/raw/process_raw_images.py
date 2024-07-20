@@ -247,9 +247,9 @@ class ImageProcessor:
             fill_value=0,
         )
 
-        ## Apply atmopsheric correction
+        # Apply atmopsheric correction
 
-        #new_image = self.atmospheric_correction(new_image)
+        new_image = self.atmospheric_correction(new_image)
 
         # Apply mask outside elevation cutoff
 
