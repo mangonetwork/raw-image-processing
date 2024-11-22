@@ -57,13 +57,13 @@ class Calibrate:
         self.A = np.pi / 2.0
         self.B = -(np.pi / 2.0 + self.C + self.D)
 
-        # DEBUG: To confirm star locations match after transformation
-        # xt, yt = self.transform(x, y, self.x0, self.y0, self.rl,
-        #                           self.theta, self.A, self.B, self.C, self.D)
-        # import matplotlib.pyplot as plt
-        # plt.scatter(xp, yp)
-        # plt.scatter(xt, yt)
-        # plt.show()
+        ## DEBUG: To confirm star locations match after transformation
+        #xt, yt = self.transform(x, y, self.x0, self.y0, self.rl,
+        #                          self.theta, self.A, self.B, self.C, self.D)
+        #import matplotlib.pyplot as plt
+        #plt.scatter(xp, yp)
+        #plt.scatter(xt, yt)
+        #plt.show()
 
     # pylint: disable=too-many-arguments, too-many-locals
 
