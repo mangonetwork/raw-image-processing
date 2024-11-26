@@ -83,8 +83,7 @@ class QuickLook:
         cooked_image = np.array(image)
         if self.remove_background:
             cooked_image = imageops.background_removal(cooked_image)
-        if self.contrast:
-            cooked_image = imageops.equalize(cooked_image, self.contrast)
+        cooked_image = imageops.equalize(cooked_image, self.contrast)
         cooked_image = imageops.invert(cooked_image)
         cooked_image = imageops.rotate(cooked_image, self.rotation_angle)
 

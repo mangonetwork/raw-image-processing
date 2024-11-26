@@ -250,7 +250,8 @@ class ImageProcessor:
 
         elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
         remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
-        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=False)
+        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=100)
+        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION")
         vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
         extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
         uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
@@ -261,7 +262,7 @@ class ImageProcessor:
         if remove_background:
             cooked_image = imageops.background_removal(cooked_image)
 
-        if contrast:
+        if histequal:
             cooked_image = imageops.equalize(cooked_image, contrast)
 
         new_image = griddata(
@@ -284,7 +285,6 @@ class ImageProcessor:
         # Renormalize each image and convert to int
 
         if uint8_out:
-
            new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
         return new_image
@@ -302,6 +302,12 @@ def write_to_hdf5(output_file, config, results):
 
     site_name = config.get("SITE_INFO", "SITE_NAME")
     ha = config.getfloat("PROCESSING", "ALTITUDE")
+    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
+    backremove = config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
+    contrast = config.getfloat("PROCESSING", "CONTRAST", fallback=100)
+    histequal = config.getboolean("PROCESSING", "EQUALIZATION")
+    vanrhijn = config.getboolean("PROCESSING", "VANRHIJN")
+    extinction = config.getboolean("PROCESSING", "EXTINCTION")
 
     start_time = [rec.metadata["start_time"] for rec in results]
     end_time = [rec.metadata["end_time"] for rec in results]
@@ -313,6 +319,7 @@ def write_to_hdf5(output_file, config, results):
 
     with h5py.File(output_file, "w") as f:
         f.create_group("SiteInfo")
+        f.create_group("ProcessingInfo")
 
         t = f.create_dataset(
             "UnixTime",
@@ -363,6 +370,7 @@ def write_to_hdf5(output_file, config, results):
             "Description"
         ] = "coordinates of each pixel in grid at the airglow altitude"
         pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
+        pc.attrs["Projection Altitude"] = ha
         pc.attrs["Unit"] = "km"
 
         images = f.create_dataset(
@@ -396,6 +404,24 @@ def write_to_hdf5(output_file, config, results):
         )
         coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
         coord.attrs["Unit"] = "degrees"
+
+        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
+        ec.attrs["Description"] = "elevation angle cutoff [deg]"
+
+        cont = f.create_dataset("ProcessingInfo/Contrast", data=contrast)
+        cont.attrs["Description"] = "contrast value used for histogram equalization"
+
+        he = f.create_dataset("ProcessingInfo/HistogramEqualization", data=histequal)
+        he.attrs["Description"] = "0 = no histogram equalization applied to image; 1 = histogram equalization applied to image"
+
+        br = f.create_dataset("ProcessingInfo/BackgroundRemoval", data=backremove)
+        br.attrs["Description"] = "0 = background has not been subtracted from image; 1 = background has been subtracted from image"
+
+        vr = f.create_dataset("ProcessingInfo/VanRhijnCorrection", data=vanrhijn)
+        vr.attrs["Description"] = "0 = Van Rhijn effect has not be removed from the image; 1 = Van Rhijn effect has been removed from the image"
+
+        ef = f.create_dataset("ProcessingInfo/ExtinctionFactor", data=extinction)
+        ef.attrs["Description"] = "0 = extinction factor atmospheric correction has not been applied to the image; 1 = extinction factor atmospheric correction has been applied to the image"
 
 
 def worker(filename):
