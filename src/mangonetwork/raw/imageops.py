@@ -62,6 +62,26 @@ def equalize(image, contrast, num_bins=10000):
 
     return image_array_1d.reshape(image.shape)
 
+def background_removal(image):
+
+    # Offset from edge of image and size of region for determining the background in each corner of image
+    offx = int(0.015*image.shape[1])
+    sizex = int(0.05*image.shape[1])
+    offy = int(0.015*image.shape[0])
+    sizey = int(0.05*image.shape[0])
+
+    # Calculate means in the four corners
+    m1 = image[offy:offy+sizey, offx:offx+sizex].mean()
+    m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].mean()
+    m3 = image[offy:offy+sizey, -(offx+sizex):-offx].mean()
+    m4 = image[-(offy+sizey):-offy, offx:offx+sizex].mean()
+    m = np.mean([m1,m2,m3,m4])
+    # Subtract mean and set a 0 floor
+    image = image - m
+    image[image < 0] = 0
+
+    return image
+
 
 def invert(image):
     """Flip image"""

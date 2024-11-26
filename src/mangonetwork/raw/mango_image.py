@@ -27,6 +27,9 @@
 #               Make PEP8 compliant
 #               Remove unused code that had been commented out
 #
+#
+#   Note: Most functionality in this file has been moved to imageops.py
+#     This file can probably be depricated.
 ##########################################################################
 
 import copy
