@@ -206,7 +206,7 @@ class ImageProcessor:
         self.longitude = lon * 180.0 / np.pi
 
 
-    def atmospheric_correction(self, image):
+    def atmospheric_correction(self, image, vanrhijn=True, extinction=True):
         """Apply atmospheric correction"""
 
         # Atmospheric corrections are taken from Kubota et al., 2001
@@ -218,15 +218,28 @@ class ImageProcessor:
 
         za = np.pi / 2 - self.elevation * np.pi / 180.0
 
-        # Kubota et al., 2001; eqn. 6
+        if vanrhijn:
 
-        vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
+            # Kubota et al., 2001; eqn. 6
 
-        # Kubota et al., 2001; eqn. 7,8
+            vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
 
-        a = 0.2
-        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-        extinction_factor = 10.0 ** (0.4 * a * F)
+        else:
+            
+            vanrhijn_factor = np.ones(za.shape)
+
+
+        if extinction:
+
+            # Kubota et al., 2001; eqn. 7,8
+
+            a = 0.2
+            F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
+            extinction_factor = 10.0 ** (0.4 * a * F)
+
+        else:
+
+            extinction_factor = np.ones(za.shape)
 
         correction = vanrhijn_factor * extinction_factor
 
@@ -235,12 +248,21 @@ class ImageProcessor:
     def process(self, raw_image):
         """Processing algorithm"""
 
-        contrast = self.config.getint("PROCESSING", "CONTRAST")
         elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
+        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=False)
+        vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
+        extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
+        uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
 
         cooked_image = np.array(raw_image)
-        #cooked_image = imageops.equalize(cooked_image, contrast)
-        cooked_image = imageops.background_removal(cooked_image)
+
+        # Does it matter which of these operations is performed first?
+        if remove_background:
+            cooked_image = imageops.background_removal(cooked_image)
+
+        if contrast:
+            cooked_image = imageops.equalize(cooked_image, contrast)
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
@@ -251,15 +273,19 @@ class ImageProcessor:
 
         # Apply atmopsheric correction
 
-        new_image = self.atmospheric_correction(new_image)
+        new_image = self.atmospheric_correction(
+            new_image, vanrhijn=vanrhijn, extinction=extinction
+        )
 
         # Apply mask outside elevation cutoff
 
         new_image[self.elevation < elev_cutoff] = 0.0
 
-        ## Renormalize each image and convert to int
+        # Renormalize each image and convert to int
 
-        #new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
+        if uint8_out:
+
+           new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
         return new_image
 
@@ -274,7 +300,7 @@ class ImageProcessor:
 def write_to_hdf5(output_file, config, results):
     """Save results to an HDF5 file"""
 
-    site_name = config.get("PROCESSING", "SITE_NAME")
+    site_name = config.get("SITE_INFO", "SITE_NAME")
     ha = config.getfloat("PROCESSING", "ALTITUDE")
 
     start_time = [rec.metadata["start_time"] for rec in results]
