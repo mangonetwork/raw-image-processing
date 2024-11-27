@@ -34,3 +34,16 @@
                 mto-redline
                 par-redline
             Release 1.2.2
+
+2023-09-05  Todd Valentic
+            Updated configuration and calibration files for: 
+                bdr-greenline
+                cfs-greenline
+                cvo-redline
+                eio-redline
+                mdk-redline
+                mro-greenline
+                mto-redline
+                par-redline
+            Release 1.2.3
+
