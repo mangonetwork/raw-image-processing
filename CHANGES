@@ -47,3 +47,24 @@
                 par-redline
             Release 1.2.3
 
+2023-09-26  Todd Valentic
+            Fix config files for:
+                mto-redline
+                par-redline
+            Release 1.2.4
+                
+2024-04-12  Todd Valentic
+            Add preliminary (uncalibrated) config files for:
+                new-greenline
+                ksi-redline
+            Release 1.2.5
+
+2024-05-21  Todd Valentic
+            Add calibrated config files for:
+                new-greenline
+            Merged star calibration code
+            Remove merge artifacts from:
+                mto-redline
+                par-redline
+            Release 1.2.6
+
