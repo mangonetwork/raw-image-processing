@@ -386,7 +386,7 @@ def write_to_hdf5(output_file, config, results):
         mask = f.create_dataset(
             "Mask", data=rec.image_mask, compression="gzip", compression_opts=1
         )
-        mask.attrs["Description"] = "image mask"
+        mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
 
         ccd = f.create_dataset("CCDTemperature", data=ccd_temp)
         ccd.attrs["Description"] = "Temperature of CCD"
