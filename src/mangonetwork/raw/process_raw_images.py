@@ -205,7 +205,8 @@ class ImageProcessor:
         self.latitude = lat * 180.0 / np.pi
         self.longitude = lon * 180.0 / np.pi
 
-    def atmospheric_correction(self, image):
+
+    def atmospheric_correction(self, image, vanrhijn=True, extinction=True):
         """Apply atmospheric correction"""
 
         # Atmospheric corrections are taken from Kubota et al., 2001
@@ -217,15 +218,28 @@ class ImageProcessor:
 
         za = np.pi / 2 - self.elevation * np.pi / 180.0
 
-        # Kubota et al., 2001; eqn. 6
+        if vanrhijn:
 
-        vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
+            # Kubota et al., 2001; eqn. 6
 
-        # Kubota et al., 2001; eqn. 7,8
+            vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
 
-        a = 0.2
-        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-        extinction_factor = 10.0 ** (0.4 * a * F)
+        else:
+            
+            vanrhijn_factor = np.ones(za.shape)
+
+
+        if extinction:
+
+            # Kubota et al., 2001; eqn. 7,8
+
+            a = 0.2
+            F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
+            extinction_factor = 10.0 ** (0.4 * a * F)
+
+        else:
+
+            extinction_factor = np.ones(za.shape)
 
         correction = vanrhijn_factor * extinction_factor
 
@@ -234,11 +248,22 @@ class ImageProcessor:
     def process(self, raw_image):
         """Processing algorithm"""
 
-        contrast = self.config.getint("PROCESSING", "CONTRAST")
         elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
+        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=100)
+        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION")
+        vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
+        extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
+        uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
 
         cooked_image = np.array(raw_image)
-        cooked_image = imageops.equalize(cooked_image, contrast)
+
+        # Does it matter which of these operations is performed first?
+        if remove_background:
+            cooked_image = imageops.background_removal(cooked_image)
+
+        if histequal:
+            cooked_image = imageops.equalize(cooked_image, contrast)
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
@@ -249,7 +274,9 @@ class ImageProcessor:
 
         # Apply atmopsheric correction
 
-        new_image = self.atmospheric_correction(new_image)
+        new_image = self.atmospheric_correction(
+            new_image, vanrhijn=vanrhijn, extinction=extinction
+        )
 
         # Apply mask outside elevation cutoff
 
@@ -257,7 +284,8 @@ class ImageProcessor:
 
         # Renormalize each image and convert to int
 
-        new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
+        if uint8_out:
+           new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
         return new_image
 
@@ -272,8 +300,14 @@ class ImageProcessor:
 def write_to_hdf5(output_file, config, results):
     """Save results to an HDF5 file"""
 
-    site_name = config.get("PROCESSING", "SITE_NAME")
+    site_name = config.get("SITE_INFO", "SITE_NAME")
     ha = config.getfloat("PROCESSING", "ALTITUDE")
+    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
+    backremove = config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
+    contrast = config.getfloat("PROCESSING", "CONTRAST", fallback=100)
+    histequal = config.getboolean("PROCESSING", "EQUALIZATION")
+    vanrhijn = config.getboolean("PROCESSING", "VANRHIJN")
+    extinction = config.getboolean("PROCESSING", "EXTINCTION")
 
     start_time = [rec.metadata["start_time"] for rec in results]
     end_time = [rec.metadata["end_time"] for rec in results]
@@ -285,6 +319,7 @@ def write_to_hdf5(output_file, config, results):
 
     with h5py.File(output_file, "w") as f:
         f.create_group("SiteInfo")
+        f.create_group("ProcessingInfo")
 
         t = f.create_dataset(
             "UnixTime",
@@ -335,6 +370,7 @@ def write_to_hdf5(output_file, config, results):
             "Description"
         ] = "coordinates of each pixel in grid at the airglow altitude"
         pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
+        pc.attrs["Projection Altitude"] = ha
         pc.attrs["Unit"] = "km"
 
         images = f.create_dataset(
@@ -350,7 +386,7 @@ def write_to_hdf5(output_file, config, results):
         mask = f.create_dataset(
             "Mask", data=rec.image_mask, compression="gzip", compression_opts=1
         )
-        mask.attrs["Description"] = "image mask"
+        mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
 
         ccd = f.create_dataset("CCDTemperature", data=ccd_temp)
         ccd.attrs["Description"] = "Temperature of CCD"
@@ -368,6 +404,24 @@ def write_to_hdf5(output_file, config, results):
         )
         coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
         coord.attrs["Unit"] = "degrees"
+
+        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
+        ec.attrs["Description"] = "elevation angle cutoff [deg]"
+
+        cont = f.create_dataset("ProcessingInfo/Contrast", data=contrast)
+        cont.attrs["Description"] = "contrast value used for histogram equalization"
+
+        he = f.create_dataset("ProcessingInfo/HistogramEqualization", data=histequal)
+        he.attrs["Description"] = "0 = no histogram equalization applied to image; 1 = histogram equalization applied to image"
+
+        br = f.create_dataset("ProcessingInfo/BackgroundRemoval", data=backremove)
+        br.attrs["Description"] = "0 = background has not been subtracted from image; 1 = background has been subtracted from image"
+
+        vr = f.create_dataset("ProcessingInfo/VanRhijnCorrection", data=vanrhijn)
+        vr.attrs["Description"] = "0 = Van Rhijn effect has not be removed from the image; 1 = Van Rhijn effect has been removed from the image"
+
+        ef = f.create_dataset("ProcessingInfo/ExtinctionFactor", data=extinction)
+        ef.attrs["Description"] = "0 = extinction factor atmospheric correction has not been applied to the image; 1 = extinction factor atmospheric correction has been applied to the image"
 
 
 def worker(filename):

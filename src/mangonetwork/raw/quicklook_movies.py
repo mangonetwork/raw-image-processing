@@ -47,9 +47,10 @@ class QuickLook:
     def load_config(self, config):
         """Get configuration values"""
 
-        self.site_name = config.get("PROCESSING", "SITE_NAME")
-        self.site_state = config.get("PROCESSING", "SITE_STATE")
-        self.contrast = config.getint("PROCESSING", "CONTRAST")
+        self.site_name = config.get("SITE_INFO", "SITE_NAME")
+        self.site_state = config.get("SITE_INFO", "SITE_STATE")
+        self.remove_background = config.getboolean("QUICKLOOK", "REMOVE_BACKGROUND")
+        self.contrast = config.getfloat("QUICKLOOK", "CONTRAST", fallback=False)
 
         try:
             self.rotation_angle = config.getfloat("CALIBRATION_PARAMS", "THETA")
@@ -80,6 +81,8 @@ class QuickLook:
         image = h5py.File(filename, "r")["image"]
 
         cooked_image = np.array(image)
+        if self.remove_background:
+            cooked_image = imageops.background_removal(cooked_image)
         cooked_image = imageops.equalize(cooked_image, self.contrast)
         cooked_image = imageops.invert(cooked_image)
         cooked_image = imageops.rotate(cooked_image, self.rotation_angle)
