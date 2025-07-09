@@ -77,6 +77,7 @@ class ImageProcessor:
 
         self.create_transform_grids(raw_image)
         self.create_position_arrays(raw_image)
+        self.atmospheric_correction()
 
         self.image = self.process(raw_image)
 
@@ -206,8 +207,47 @@ class ImageProcessor:
         self.longitude = lon * 180.0 / np.pi
 
 
-    def atmospheric_correction(self, image, vanrhijn=True, extinction=True):
-        """Apply atmospheric correction"""
+#    def atmospheric_correction(self, image, vanrhijn=True, extinction=True):
+#        """Apply atmospheric correction"""
+#
+#        # Atmospheric corrections are taken from Kubota et al., 2001
+#        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
+#        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
+#        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
+#
+#        # calculate zenith angle
+#
+#        za = np.pi / 2 - self.elevation * np.pi / 180.0
+#
+#        if vanrhijn:
+#
+#            # Kubota et al., 2001; eqn. 6
+#
+#            vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
+#
+#        else:
+#            
+#            vanrhijn_factor = np.ones(za.shape)
+#
+#
+#        if extinction:
+#
+#            # Kubota et al., 2001; eqn. 7,8
+#
+#            a = 0.2
+#            F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
+#            extinction_factor = 10.0 ** (0.4 * a * F)
+#
+#        else:
+#
+#            extinction_factor = np.ones(za.shape)
+#
+#        correction = vanrhijn_factor * extinction_factor
+#
+#        return image * correction
+
+    def atmospheric_correction(self):
+        """Calculate atmospheric correction arrays"""
 
         # Atmospheric corrections are taken from Kubota et al., 2001
         # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
@@ -218,32 +258,18 @@ class ImageProcessor:
 
         za = np.pi / 2 - self.elevation * np.pi / 180.0
 
-        if vanrhijn:
+        # Kubota et al., 2001; eqn. 6
 
-            # Kubota et al., 2001; eqn. 6
-
-            vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
-
-        else:
-            
-            vanrhijn_factor = np.ones(za.shape)
+        self.vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
 
 
-        if extinction:
+        # Kubota et al., 2001; eqn. 7,8
 
-            # Kubota et al., 2001; eqn. 7,8
+        a = 0.2
+        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
+        self.extinction_factor = 10.0 ** (0.4 * a * F)
 
-            a = 0.2
-            F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-            extinction_factor = 10.0 ** (0.4 * a * F)
 
-        else:
-
-            extinction_factor = np.ones(za.shape)
-
-        correction = vanrhijn_factor * extinction_factor
-
-        return image * correction
 
     def process(self, raw_image):
         """Processing algorithm"""
@@ -251,7 +277,7 @@ class ImageProcessor:
         elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
         remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
         contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=100)
-        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION")
+        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION", fallback=False)
         vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
         extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
         uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
@@ -273,10 +299,15 @@ class ImageProcessor:
         )
 
         # Apply atmopsheric correction
+        if vanrhijn:
+            new_image *= self.vanrhijn_factor
 
-        new_image = self.atmospheric_correction(
-            new_image, vanrhijn=vanrhijn, extinction=extinction
-        )
+        if extinction:
+            new_image *= self.extinction_factor
+
+        #new_image = self.atmospheric_correction(
+        #    new_image, vanrhijn=vanrhijn, extinction=extinction
+        #)
 
         # Apply mask outside elevation cutoff
 
@@ -382,6 +413,16 @@ def write_to_hdf5(output_file, config, results):
         images.attrs["Description"] = "pixel values for images"
         images.attrs["Site Abbreviation"] = rec.metadata["code"]
         images.attrs["Image label"] = rec.metadata["label"]
+
+        vr = f.create_dataset(
+            "VanRhijnFactor", data=rec.vanrhijn_factor, compression="gzip", compression_opts=1
+        )
+        vr.attrs["Description"] = "Van Rhijn correction factor for each image in ImageData array"
+
+        ef = f.create_dataset(
+            "ExtinctionFactor", data=rec.extinction_factor, compression="gzip", compression_opts=1
+        )
+        ef.attrs["Description"] = "Extinction factor for each image in ImageData array"
 
         mask = f.create_dataset(
             "Mask", data=rec.image_mask, compression="gzip", compression_opts=1
