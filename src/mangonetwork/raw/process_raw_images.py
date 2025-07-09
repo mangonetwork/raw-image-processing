@@ -60,6 +60,8 @@ class ImageProcessor:
         self.latitude = None
         self.longitude = None
         self.image_mask = None
+        self.vanrhijn_factor = None
+        self.extinction_factor = None
         self.new_x_grid = None
         self.new_y_grid = None
         self.trans_x_grid = None
