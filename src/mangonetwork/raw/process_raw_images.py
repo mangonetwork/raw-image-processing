@@ -28,6 +28,10 @@ import h5py
 import numpy as np
 from scipy.interpolate import griddata
 
+# skyfield stuff needed for moon flags
+from skyfield import almanac
+from skyfield.api import N, S, E, W, load, wgs84
+
 from . import imageops
 
 if sys.version_info < (3, 9):
@@ -83,6 +87,8 @@ class ImageProcessor:
 
         self.image = self.process(raw_image)
 
+        self.quality_flags()
+
         logging.debug("Processing finished")
 
     def get_metadata(self, image):
@@ -102,6 +108,34 @@ class ImageProcessor:
         metadata["site_lon"] = image.attrs["longitude"]
 
         return metadata
+
+    def quality_flags(self):
+        """Calculate the Moon and cloud quality flags"""
+        # NOTE: These do not currently save to the output file
+        # Placeholder for this calculation - it is likely it will end up ocurring outside of raw processing
+
+        # Calculate moon phase and elevation
+        start_time = self.metadata["start_time"]
+        end_time = self.metadata["end_time"]
+        site_lat = self.metadata["site_lat"]
+        site_lon = self.metadata["site_lon"]
+
+        eph = load('de421.bsp')
+        ts = load.timescale()
+
+        time = (start_time + end_time)/2.
+        t = ts.utc(1970, 1, 1, 0, 0, time)
+        print(t.utc_datetime())
+        phase = almanac.moon_phase(eph, t)
+        print("Moon Phase:", phase.degrees)
+
+        earth = eph["earth"]
+        site = earth + wgs84.latlon(site_lat, site_lon)
+        moon = eph["moon"]
+        elevation, _, _ = site.at(t).observe(moon).apparent().altaz()
+        print("Moon Elevation:", elevation.degrees)
+
+        # Calculate cloud flag
 
     def create_transform_grids(self, image):
         """Create transformation grids"""
