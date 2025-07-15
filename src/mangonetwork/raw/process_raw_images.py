@@ -132,7 +132,7 @@ class ImageProcessor:
         earth = eph["earth"]
         site = earth + wgs84.latlon(site_lat, site_lon)
         moon = eph["moon"]
-        elevation, _, _ = site.at(t).observe(moon).apparent().altaz()
+        elevation, azimuth, dist = site.at(t).observe(moon).apparent().altaz()
         print("Moon Elevation:", elevation.degrees)
 
         # Calculate cloud flag
