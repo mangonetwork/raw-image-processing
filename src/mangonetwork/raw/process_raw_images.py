@@ -23,12 +23,15 @@ import multiprocessing
 import pathlib
 import os
 import sys
+import time
 
 import h5py
 import numpy as np
 from scipy.interpolate import griddata
 
 from . import imageops
+
+import matplotlib.pyplot as plt
 
 if sys.version_info < (3, 9):
     import importlib_resources as resources
@@ -40,6 +43,11 @@ RE = 6371.0  # Earth radius (m)
 # -------------------------------------------------------------------------
 # Image Processor
 # -------------------------------------------------------------------------
+# Raw Processing:
+# - Dewarp
+# - Rotate
+# - Az/El grid
+# - Transfer metadata from raw files
 
 
 class ImageProcessor:
@@ -48,7 +56,7 @@ class ImageProcessor:
     def __init__(self, config):
         self.config = config
 
-        ha = self.config.getfloat("PROCESSING", "ALTITUDE")
+        ha = self.config.getfloat("PROCESSING", "ALTITUDE") # Remove altitude dependence from initial raw processing?
         self.REha = RE + ha
 
         # Results
@@ -77,11 +85,21 @@ class ImageProcessor:
         self.metadata = self.get_metadata(raw_image)
         self.metadata["filename"] = filename
 
+        #t1 = time.perf_counter()
         self.create_transform_grids(raw_image)
+        #t2 = time.perf_counter()
         self.create_position_arrays(raw_image)
-        self.atmospheric_correction()
+        #t3 = time.perf_counter()
+        #self.atmospheric_correction()
+        #t4 = time.perf_counter()
 
         self.image = self.process(raw_image)
+        #t5 = time.perf_counter()
+
+        #print(f'create_transform_grids: {t2 - t1:0.4f} seconds')
+        #print(f'create_position_arrays: {t3 - t2:0.4f} seconds')
+        #print(f'atmospheric_correction: {t4 - t3:0.4f} seconds')
+        #print(f'process: {t5 - t4:0.4f} seconds')
 
         logging.debug("Processing finished")
 
@@ -113,6 +131,8 @@ class ImageProcessor:
 
         new_i_max = self.config.getint("PROCESSING", "NEWIMAX")
         new_j_max = self.config.getint("PROCESSING", "NEWJMAX")
+        #new_i_max = 500
+        #new_j_max = 500
 
         x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
         y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
@@ -130,9 +150,24 @@ class ImageProcessor:
 
         x_grid, y_grid = np.meshgrid(np.arange(i_max), np.arange(j_max))
 
+        #plt.scatter(x_grid, y_grid)
+        #plt.show()
+
+        #az, el = self.transform(
+        #    x_grid, y_grid, x0, y0, rl, theta, A, B, C, D
+        #)
+
+        #fig = plt.figure()
+        #ax = fig.add_subplot(111, projection='polar')
+        #ax.scatter(az, np.cos(el))
+        #plt.show()
+
         self.trans_x_grid, self.trans_y_grid = self.transform(
             x_grid, y_grid, x0, y0, rl, theta, A, B, C, D
         )
+
+        #plt.scatter(self.trans_x_grid, self.trans_y_grid)
+        #plt.show()
 
         # Find unwarped distance to elevation cutoff and create new grid
 
@@ -141,6 +176,15 @@ class ImageProcessor:
         self.new_x_grid, self.new_y_grid = np.meshgrid(
             np.linspace(-d, d, new_i_max), np.linspace(-d, d, new_j_max)
         )
+
+        #print(d)
+        #plt.scatter(self.trans_x_grid, self.trans_y_grid, c=np.array(image))
+        #plt.axvline(d)
+        #plt.axvline(-d)
+        #plt.axhline(d)
+        #plt.axhline(-d)
+        ##plt.scatter(self.new_x_grid, self.new_y_grid)
+        #plt.show()
 
     # pylint: disable=too-many-arguments, too-many-locals
 
@@ -156,6 +200,8 @@ class ImageProcessor:
 
         r = np.sqrt(x2**2 + y2**2)
         lam = A + B * r + C * r**2 + D * r**3
+
+        #return np.arctan2(y2, x2), lam
         d = self.unwarp(lam)
 
         x3 = d * x2 / r
@@ -191,6 +237,7 @@ class ImageProcessor:
         azm = np.arctan2(self.new_x_grid, self.new_y_grid)
         self.image_mask = elv < elev_cutoff * np.pi / 180.0
 
+        # This should all be in a higher-level data product - altitude dependent
         # Use Haversine equations to find lat/lon of each point
 
         lat = np.arcsin(
@@ -248,50 +295,51 @@ class ImageProcessor:
 #
 #        return image * correction
 
-    def atmospheric_correction(self):
-        """Calculate atmospheric correction arrays"""
-
-        # Atmospheric corrections are taken from Kubota et al., 2001
-        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
-        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
-        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
-
-        # calculate zenith angle
-
-        za = np.pi / 2 - self.elevation * np.pi / 180.0
-
-        # Kubota et al., 2001; eqn. 6
-
-        self.vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
-
-
-        # Kubota et al., 2001; eqn. 7,8
-
-        a = 0.2
-        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-        self.extinction_factor = 10.0 ** (0.4 * a * F)
-
+#    def atmospheric_correction(self):
+#        """Calculate atmospheric correction arrays"""
+#
+#        # Atmospheric corrections are taken from Kubota et al., 2001
+#        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
+#        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
+#        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
+#
+#        # calculate zenith angle
+#
+#        za = np.pi / 2 - self.elevation * np.pi / 180.0
+#
+#        # Kubota et al., 2001; eqn. 6
+#
+#        self.vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
+#
+#
+#        # Kubota et al., 2001; eqn. 7,8
+#
+#        a = 0.2
+#        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
+#        self.extinction_factor = 10.0 ** (0.4 * a * F)
+#
 
 
     def process(self, raw_image):
         """Processing algorithm"""
 
         elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-        remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
-        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=100)
-        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION", fallback=False)
-        vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
-        extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
-        uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
+#        remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
+#        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=100)
+#        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION", fallback=False)
+#        vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
+#        extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
+#        uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
 
         cooked_image = np.array(raw_image)
 
         # Does it matter which of these operations is performed first?
-        if remove_background:
-            cooked_image = imageops.background_removal(cooked_image)
-
-        if histequal:
-            cooked_image = imageops.equalize(cooked_image, contrast)
+        #background = estimate_background(image)
+#        if remove_background:
+#            cooked_image = imageops.background_removal(cooked_image)
+#
+#        if histequal:
+#            cooked_image = imageops.equalize(cooked_image, contrast)
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
@@ -300,12 +348,12 @@ class ImageProcessor:
             fill_value=0,
         )
 
-        # Apply atmopsheric correction
-        if vanrhijn:
-            new_image *= self.vanrhijn_factor
-
-        if extinction:
-            new_image *= self.extinction_factor
+#        # Apply atmopsheric correction
+#        if vanrhijn:
+#            new_image *= self.vanrhijn_factor
+#
+#        if extinction:
+#            new_image *= self.extinction_factor
 
         #new_image = self.atmospheric_correction(
         #    new_image, vanrhijn=vanrhijn, extinction=extinction
@@ -315,10 +363,9 @@ class ImageProcessor:
 
         new_image[self.elevation < elev_cutoff] = 0.0
 
-        # Renormalize each image and convert to int
-
-        if uint8_out:
-           new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
+#        # Renormalize each image and convert to int
+#        if uint8_out:
+#           new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
         return new_image
 
@@ -335,12 +382,12 @@ def write_to_hdf5(output_file, config, results):
 
     site_name = config.get("SITE_INFO", "SITE_NAME")
     ha = config.getfloat("PROCESSING", "ALTITUDE")
-    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
-    backremove = config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
-    contrast = config.getfloat("PROCESSING", "CONTRAST", fallback=100)
-    histequal = config.getboolean("PROCESSING", "EQUALIZATION")
-    vanrhijn = config.getboolean("PROCESSING", "VANRHIJN")
-    extinction = config.getboolean("PROCESSING", "EXTINCTION")
+#    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
+#    backremove = config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
+#    contrast = config.getfloat("PROCESSING", "CONTRAST", fallback=100)
+#    histequal = config.getboolean("PROCESSING", "EQUALIZATION")
+#    vanrhijn = config.getboolean("PROCESSING", "VANRHIJN")
+#    extinction = config.getboolean("PROCESSING", "EXTINCTION")
 
     start_time = [rec.metadata["start_time"] for rec in results]
     end_time = [rec.metadata["end_time"] for rec in results]
@@ -416,15 +463,15 @@ def write_to_hdf5(output_file, config, results):
         images.attrs["Site Abbreviation"] = rec.metadata["code"]
         images.attrs["Image label"] = rec.metadata["label"]
 
-        vr = f.create_dataset(
-            "VanRhijnFactor", data=rec.vanrhijn_factor, compression="gzip", compression_opts=1
-        )
-        vr.attrs["Description"] = "Van Rhijn correction factor for each image in ImageData array"
-
-        ef = f.create_dataset(
-            "ExtinctionFactor", data=rec.extinction_factor, compression="gzip", compression_opts=1
-        )
-        ef.attrs["Description"] = "Extinction factor for each image in ImageData array"
+#        vr = f.create_dataset(
+#            "VanRhijnFactor", data=rec.vanrhijn_factor, compression="gzip", compression_opts=1
+#        )
+#        vr.attrs["Description"] = "Van Rhijn correction factor for each image in ImageData array"
+#
+#        ef = f.create_dataset(
+#            "ExtinctionFactor", data=rec.extinction_factor, compression="gzip", compression_opts=1
+#        )
+#        ef.attrs["Description"] = "Extinction factor for each image in ImageData array"
 
         mask = f.create_dataset(
             "Mask", data=rec.image_mask, compression="gzip", compression_opts=1
@@ -448,23 +495,23 @@ def write_to_hdf5(output_file, config, results):
         coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
         coord.attrs["Unit"] = "degrees"
 
-        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
-        ec.attrs["Description"] = "elevation angle cutoff [deg]"
-
-        cont = f.create_dataset("ProcessingInfo/Contrast", data=contrast)
-        cont.attrs["Description"] = "contrast value used for histogram equalization"
-
-        he = f.create_dataset("ProcessingInfo/HistogramEqualization", data=histequal)
-        he.attrs["Description"] = "0 = no histogram equalization applied to image; 1 = histogram equalization applied to image"
-
-        br = f.create_dataset("ProcessingInfo/BackgroundRemoval", data=backremove)
-        br.attrs["Description"] = "0 = background has not been subtracted from image; 1 = background has been subtracted from image"
-
-        vr = f.create_dataset("ProcessingInfo/VanRhijnCorrection", data=vanrhijn)
-        vr.attrs["Description"] = "0 = Van Rhijn effect has not be removed from the image; 1 = Van Rhijn effect has been removed from the image"
-
-        ef = f.create_dataset("ProcessingInfo/ExtinctionFactor", data=extinction)
-        ef.attrs["Description"] = "0 = extinction factor atmospheric correction has not been applied to the image; 1 = extinction factor atmospheric correction has been applied to the image"
+#        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
+#        ec.attrs["Description"] = "elevation angle cutoff [deg]"
+#
+#        cont = f.create_dataset("ProcessingInfo/Contrast", data=contrast)
+#        cont.attrs["Description"] = "contrast value used for histogram equalization"
+#
+#        he = f.create_dataset("ProcessingInfo/HistogramEqualization", data=histequal)
+#        he.attrs["Description"] = "0 = no histogram equalization applied to image; 1 = histogram equalization applied to image"
+#
+#        br = f.create_dataset("ProcessingInfo/BackgroundRemoval", data=backremove)
+#        br.attrs["Description"] = "0 = background has not been subtracted from image; 1 = background has been subtracted from image"
+#
+#        vr = f.create_dataset("ProcessingInfo/VanRhijnCorrection", data=vanrhijn)
+#        vr.attrs["Description"] = "0 = Van Rhijn effect has not be removed from the image; 1 = Van Rhijn effect has been removed from the image"
+#
+#        ef = f.create_dataset("ProcessingInfo/ExtinctionFactor", data=extinction)
+#        ef.attrs["Description"] = "0 = extinction factor atmospheric correction has not been applied to the image; 1 = extinction factor atmospheric correction has been applied to the image"
 
 
 def worker(filename):
@@ -550,11 +597,21 @@ def find_config(filename):
         station = h5["image"].attrs["station"]
         instrument = h5["image"].attrs["instrument"]
 
-    name = f"{station}-{instrument}.ini"
+    # Placeholder for default config file location
+    #   This function can be rewritten later
+    config_dir = os.environ['MANGONETWORK_CONFIGS']
 
-    logging.debug("Using package configuration file: %s", name)
+    config_file = os.path.join(config_dir, f"{station}-{instrument}.ini")
 
-    return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    logging.debug("Using package configuration file: %s", config_file)
+
+    #name = f"{station}-{instrument}.ini"
+
+    #logging.debug("Using package configuration file: %s", name)
+
+    #return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    return config_file
+
 
 
 def main():
@@ -589,12 +646,18 @@ def main():
         contents = find_config(inputs[0])
 
     config = configparser.ConfigParser()
-    config.read_string(contents)
+    #config.read_string(contents)
+    config.read(contents)
 
+    # Make whether or not to multiprocess an option
     with multiprocessing.Pool(
         processes=args.numproc, initializer=worker_init, initargs=(config,)
     ) as pool:
         results = pool.map(worker, inputs, chunksize=1)
+
+    #processor = ImageProcessor(config)
+    #for filename in inputs:
+    #    processor.run(filename)
 
     output_file = pathlib.Path(args.output)
     write_to_hdf5(output_file, config, results)

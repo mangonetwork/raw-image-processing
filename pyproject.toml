@@ -50,10 +50,10 @@ repository="https://github.com/mangonetwork/raw-image-processing"
 
 [project.scripts]
     mango-process-raw-images = "mangonetwork.raw.process_raw_images:main"
-    mango-calibrate = "mangonetwork.raw.calibrate:main"
-    mango-keograms = "mangonetwork.raw.keograms:main"
+    #mango-calibrate = "mangonetwork.raw.calibrate:main"
+    #mango-keograms = "mangonetwork.raw.keograms:main"
     mango-quicklook-movies = "mangonetwork.raw.quicklook_movies:main"
-    mango-starcal = "mangonetwork.raw.starcal:main"
+    #mango-starcal = "mangonetwork.raw.starcal:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
