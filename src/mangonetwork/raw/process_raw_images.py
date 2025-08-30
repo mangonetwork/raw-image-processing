@@ -93,7 +93,7 @@ class ImageProcessor:
         #self.atmospheric_correction()
         #t4 = time.perf_counter()
 
-        self.image = self.process(raw_image)
+        self.image, self.background = self.process(raw_image)
         #t5 = time.perf_counter()
 
         #print(f'create_transform_grids: {t2 - t1:0.4f} seconds')
@@ -334,7 +334,7 @@ class ImageProcessor:
         cooked_image = np.array(raw_image)
 
         # Does it matter which of these operations is performed first?
-        #background = estimate_background(image)
+        background = imageops.estimate_background(cooked_image)
 #        if remove_background:
 #            cooked_image = imageops.background_removal(cooked_image)
 #
@@ -367,7 +367,7 @@ class ImageProcessor:
 #        if uint8_out:
 #           new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
-        return new_image
+        return new_image, background
 
 
 # -------------------------------------------------------------------------
@@ -381,8 +381,8 @@ def write_to_hdf5(output_file, config, results):
     """Save results to an HDF5 file"""
 
     site_name = config.get("SITE_INFO", "SITE_NAME")
-    ha = config.getfloat("PROCESSING", "ALTITUDE")
-#    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
+    bright_alt = config.getfloat("PROCESSING", "ALTITUDE")
+    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
 #    backremove = config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 #    contrast = config.getfloat("PROCESSING", "CONTRAST", fallback=100)
 #    histequal = config.getboolean("PROCESSING", "EQUALIZATION")
@@ -392,6 +392,7 @@ def write_to_hdf5(output_file, config, results):
     start_time = [rec.metadata["start_time"] for rec in results]
     end_time = [rec.metadata["end_time"] for rec in results]
     ccd_temp = [rec.metadata["ccd_temp"] for rec in results]
+    background = [rec.background for rec in results]
 
     rec = results[0]
 
@@ -415,7 +416,7 @@ def write_to_hdf5(output_file, config, results):
         )
         lat.attrs["Description"] = "geodetic latitude of each pixel"
         lat.attrs["Size"] = "Ipixels x Jpixels"
-        lat.attrs["Projection Altitude"] = ha
+        lat.attrs["Projection Altitude"] = bright_alt
         lat.attrs["Unit"] = "degrees"
 
         lon = f.create_dataset(
@@ -423,7 +424,7 @@ def write_to_hdf5(output_file, config, results):
         )
         lon.attrs["Description"] = "geodetic longitude of each pixel"
         lon.attrs["Size"] = "Ipixels x Jpixels"
-        lon.attrs["Projection Altitude"] = ha
+        lon.attrs["Projection Altitude"] = bright_alt
         lon.attrs["Unit"] = "degrees"
 
         az = f.create_dataset(
@@ -450,7 +451,7 @@ def write_to_hdf5(output_file, config, results):
             "Description"
         ] = "coordinates of each pixel in grid at the airglow altitude"
         pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
-        pc.attrs["Projection Altitude"] = ha
+        pc.attrs["Projection Altitude"] = bright_alt
         pc.attrs["Unit"] = "km"
 
         images = f.create_dataset(
@@ -495,9 +496,20 @@ def write_to_hdf5(output_file, config, results):
         coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
         coord.attrs["Unit"] = "degrees"
 
-#        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
-#        ec.attrs["Description"] = "elevation angle cutoff [deg]"
-#
+        back = f.create_dataset("Background", data=background)
+        back.attrs["Description"] = "Background brightness estimation from corners"
+
+        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
+        ec.attrs["Description"] = "elevation angle cutoff [deg]"
+
+        ha = f.create_dataset("ProcessingInfo/Altitude", data=bright_alt)
+        ha.attrs["Description"] = "assumed altitude of brightness layer [km]"
+
+        # Other things to add to processing Info section
+        # Computer/version info?
+        # Date of processing
+        # Config file text?
+
 #        cont = f.create_dataset("ProcessingInfo/Contrast", data=contrast)
 #        cont.attrs["Description"] = "contrast value used for histogram equalization"
 #
