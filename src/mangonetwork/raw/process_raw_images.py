@@ -114,7 +114,8 @@ class ImageProcessor:
         metadata["start_time"] = start_time
         metadata["end_time"] = start_time + exposure_time
         metadata["ccd_temp"] = image.attrs["ccd_temp"]
-        metadata["code"] = image.attrs["station"]
+        metadata["station"] = image.attrs["station"]
+        metadata["instrument"] = image.attrs["instrument"]
         metadata["label"] = image.attrs["label"]
         metadata["site_lat"] = image.attrs["latitude"]
         metadata["site_lon"] = image.attrs["longitude"]
@@ -361,7 +362,7 @@ class ImageProcessor:
 
         # Apply mask outside elevation cutoff
 
-        new_image[self.elevation < elev_cutoff] = 0.0
+        #new_image[self.elevation < elev_cutoff] = 0.0
 
 #        # Renormalize each image and convert to int
 #        if uint8_out:
@@ -401,6 +402,7 @@ def write_to_hdf5(output_file, config, results):
     with h5py.File(output_file, "w") as f:
         f.create_group("SiteInfo")
         f.create_group("ProcessingInfo")
+        f.create_group("Coordinates")
 
         t = f.create_dataset(
             "UnixTime",
@@ -412,7 +414,7 @@ def write_to_hdf5(output_file, config, results):
         t.attrs["Unit"] = "seconds"
 
         lat = f.create_dataset(
-            "Latitude", data=rec.latitude, compression="gzip", compression_opts=1
+            "Coordinates/Latitude", data=rec.latitude, compression="gzip", compression_opts=1
         )
         lat.attrs["Description"] = "geodetic latitude of each pixel"
         lat.attrs["Size"] = "Ipixels x Jpixels"
@@ -420,7 +422,7 @@ def write_to_hdf5(output_file, config, results):
         lat.attrs["Unit"] = "degrees"
 
         lon = f.create_dataset(
-            "Longitude", data=rec.longitude, compression="gzip", compression_opts=1
+            "Coordinates/Longitude", data=rec.longitude, compression="gzip", compression_opts=1
         )
         lon.attrs["Description"] = "geodetic longitude of each pixel"
         lon.attrs["Size"] = "Ipixels x Jpixels"
@@ -428,21 +430,21 @@ def write_to_hdf5(output_file, config, results):
         lon.attrs["Unit"] = "degrees"
 
         az = f.create_dataset(
-            "Azimuth", data=rec.azimuth, compression="gzip", compression_opts=1
+            "Coordinates/Azimuth", data=rec.azimuth, compression="gzip", compression_opts=1
         )
         az.attrs["Description"] = "azimuth of each pixel"
         az.attrs["Size"] = "Ipixels x Jpixels"
         az.attrs["Unit"] = "degrees"
 
         el = f.create_dataset(
-            "Elevation", data=rec.elevation, compression="gzip", compression_opts=1
+            "Coordinates/Elevation", data=rec.elevation, compression="gzip", compression_opts=1
         )
         el.attrs["Description"] = "elevation of each pixel"
         el.attrs["Size"] = "Ipixels x Jpixels"
         el.attrs["Unit"] = "degrees"
 
         pc = f.create_dataset(
-            "PixelCoordinates",
+            "Coordinates/PixelCoordinates",
             data=np.array([rec.new_x_grid, rec.new_y_grid]),
             compression="gzip",
             compression_opts=1,
@@ -461,8 +463,8 @@ def write_to_hdf5(output_file, config, results):
             compression_opts=1,
         )
         images.attrs["Description"] = "pixel values for images"
-        images.attrs["Site Abbreviation"] = rec.metadata["code"]
-        images.attrs["Image label"] = rec.metadata["label"]
+        images.attrs["station"] = rec.metadata["station"]
+        images.attrs["instrument"] = rec.metadata["instrument"]
 
 #        vr = f.create_dataset(
 #            "VanRhijnFactor", data=rec.vanrhijn_factor, compression="gzip", compression_opts=1
@@ -486,8 +488,11 @@ def write_to_hdf5(output_file, config, results):
         name = f.create_dataset("SiteInfo/Name", data=site_name)
         name.attrs["Description"] = "site name"
 
-        code = f.create_dataset("SiteInfo/Code", data=rec.metadata["code"])
-        code.attrs["Description"] = "one letter site abbreviation/code"
+        code = f.create_dataset("SiteInfo/Code", data=rec.metadata["station"])
+        code.attrs["Description"] = "three letter site abbreviation/code"
+
+        code = f.create_dataset("SiteInfo/Instrument", data=rec.metadata["label"])
+        code.attrs["Description"] = "type of instrument"
 
         coord = f.create_dataset(
             "SiteInfo/Coordinates",
@@ -569,7 +574,7 @@ def parse_args():
     parser.add_argument(
         "-o",
         "--output",
-        default="mango.hdf5",
+        default="mango-raw.hdf5",
         help="Output filename (default is mango.hdf5)",
     )
     parser.add_argument(
