@@ -25,8 +25,8 @@ import h5py
 import hcipy
 import matplotlib.pyplot as plt
 import numpy as np
+import skimage.transform
 
-from . import imageops
 
 if sys.version_info < (3, 9):
     import importlib_resources as resources
@@ -49,7 +49,7 @@ class QuickLook:
 
         self.site_name = config.get("SITE_INFO", "SITE_NAME")
         self.site_state = config.get("SITE_INFO", "SITE_STATE")
-        self.remove_background = config.getboolean("QUICKLOOK", "REMOVE_BACKGROUND")
+        #self.remove_background = config.getboolean("QUICKLOOK", "REMOVE_BACKGROUND")
         self.contrast = config.getfloat("QUICKLOOK", "CONTRAST", fallback=False)
 
         try:
@@ -81,11 +81,11 @@ class QuickLook:
         image = h5py.File(filename, "r")["image"]
 
         cooked_image = np.array(image)
-        if self.remove_background:
-            cooked_image = imageops.background_removal(cooked_image)
-        cooked_image = imageops.equalize(cooked_image, self.contrast)
-        cooked_image = imageops.invert(cooked_image)
-        cooked_image = imageops.rotate(cooked_image, self.rotation_angle)
+        #if self.remove_background:
+        cooked_image = self.background_removal(cooked_image)
+        cooked_image = self.equalize(cooked_image, self.contrast)
+        cooked_image = self.invert(cooked_image)
+        cooked_image = self.rotate(cooked_image, self.rotation_angle)
 
         start_time = datetime.datetime.utcfromtimestamp(image.attrs["start_time"])
         exposure_time = image.attrs["exposure_time"]
@@ -127,6 +127,71 @@ class QuickLook:
         plt.close()
 
 
+    def equalize(self, image, contrast, num_bins=10000):
+        """Histogram Equalization to adjust contrast [1%-99%]"""
+    
+        image_array_1d = image.flatten()
+    
+        image_histogram, bins = np.histogram(image_array_1d, num_bins)
+        image_histogram = image_histogram[1:]
+        bins = bins[1:]
+        cdf = np.cumsum(image_histogram)
+    
+        # spliced to cut off non-image area
+        # any way to determine this dynamically?  How periminant is it?
+        cdf = cdf[:9996]
+    
+        max_cdf = max(cdf)
+        max_index = np.argmin(abs(cdf - contrast / 100 * max_cdf))
+        min_index = np.argmin(abs(cdf - (100 - contrast) / 100 * max_cdf))
+        vmax = float(bins[max_index])
+        vmin = float(bins[min_index])
+        low_value_indices = image_array_1d < vmin
+        image_array_1d[low_value_indices] = vmin
+        high_value_indices = image_array_1d > vmax
+        image_array_1d[high_value_indices] = vmax
+    
+        return image_array_1d.reshape(image.shape)
+    
+    def background_removal(self, image):
+    
+        # Offset from edge of image and size of region for determining the background in each corner of image
+        offx = int(0.015*image.shape[1])
+        sizex = int(0.05*image.shape[1])
+        offy = int(0.015*image.shape[0])
+        sizey = int(0.05*image.shape[0])
+    
+        # Calculate means in the four corners
+        m1 = image[offy:offy+sizey, offx:offx+sizex].mean()
+        m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].mean()
+        m3 = image[offy:offy+sizey, -(offx+sizex):-offx].mean()
+        m4 = image[-(offy+sizey):-offy, offx:offx+sizex].mean()
+        m = np.mean([m1,m2,m3,m4])
+        # Subtract mean and set a 0 floor
+        image = image - m
+        image[image < 0] = 0
+    
+        return image
+    
+    
+    def invert(self, image):
+        """Flip image"""
+    
+        # Makes the under/above inversion more explicit/easier to understand
+    
+        return np.flipud(image)
+    
+    
+    def rotate(self, image, angle):
+        """Rotate image"""
+    
+        # MUST flip image before rotating
+        # Images are captured from below, but visualized from above in most standard formats
+    
+        return skimage.transform.rotate(image, angle, order=3).astype(float)
+    
+
+
 def parse_args():
     """Command line options"""
 
@@ -161,11 +226,20 @@ def find_config(filename):
         station = h5["image"].attrs["station"]
         instrument = h5["image"].attrs["instrument"]
 
-    name = f"{station}-{instrument}.ini"
+    # Placeholder for default config file location
+    #   This function can be rewritten later
+    config_dir = os.environ['MANGONETWORK_CONFIGS']
 
-    logging.debug("Using package configuration file: %s", name)
+    config_file = os.path.join(config_dir, f"{station}-{instrument}.ini")
 
-    return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    logging.debug("Using package configuration file: %s", config_file)
+
+    #name = f"{station}-{instrument}.ini"
+
+    #logging.debug("Using package configuration file: %s", name)
+
+    #return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    return config_file
 
 
 def find_inputfiles(args):
@@ -211,7 +285,8 @@ def main():
         contents = find_config(inputs[0])
 
     config = configparser.ConfigParser()
-    config.read_string(contents)
+    #config.read_string(contents)
+    config.read(contents)
 
     QuickLook(config, inputs, args)
 

@@ -62,13 +62,54 @@ def equalize(image, contrast, num_bins=10000):
 
     return image_array_1d.reshape(image.shape)
 
-def background_removal(image):
+def background_removal(image, x0, y0, rl):
+    import matplotlib.pyplot as plt
+    from scipy.stats import norm
 
     # Offset from edge of image and size of region for determining the background in each corner of image
     offx = int(0.015*image.shape[1])
     sizex = int(0.05*image.shape[1])
     offy = int(0.015*image.shape[0])
     sizey = int(0.05*image.shape[0])
+    # This is the best we can do for uncalibrated
+    # For calibrated, may be able to make a better estimate from the mask at the el=0 level
+
+    xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
+    mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl+10.
+
+    masked_image = np.ma.masked_array(image, ~mask)
+    c = plt.imshow(masked_image, vmin=0., vmax=600.)
+    plt.axhline(offy)
+    plt.axhline(offy+sizey)
+    plt.axvline(offx)
+    plt.axvline(offx+sizex)
+    plt.colorbar(c)
+    #plt.imshow(mask, cmap='Greys')
+    plt.show()
+
+    m1 = image[offy:offy+sizey, offx:offx+sizex].flatten()
+    m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].flatten()
+    m3 = image[offy:offy+sizey, -(offx+sizex):-offx].flatten()
+    m4 = image[-(offy+sizey):-offy, offx:offx+sizex].flatten()
+    
+    plt.hist(m1, bins=np.arange(0.,600.,10.), histtype='step', density=True)
+    plt.hist(m2, bins=np.arange(0.,600.,10.), histtype='step', density=True)
+    plt.hist(m3, bins=np.arange(0.,600.,10.), histtype='step', density=True)
+    plt.hist(m4, bins=np.arange(0.,600.,10.), histtype='step', density=True)
+    print(image.size, image[mask].size)
+    mu = np.mean(image[mask])
+    sig = np.std(image[mask])
+    print(mu, sig)
+    print(np.mean(m1), np.std(m1))
+    print(np.mean(m2), np.std(m2))
+    print(np.mean(m3), np.std(m3))
+    print(np.mean(m4), np.std(m4))
+    plt.hist(image[mask], bins=np.arange(0., 600., 10.), histtype='step', density=True)
+    #plt.hist(image[mask], histtype='step', density=True)
+    x = np.arange(0., 600., 10.)
+    plt.plot(x, norm.pdf(x, loc=mu, scale=sig))
+    plt.plot(x, norm.pdf(x, loc=np.mean(m1), scale=np.std(m1)))
+    plt.show()
 
     # Calculate means in the four corners
     m1 = image[offy:offy+sizey, offx:offx+sizex].mean()
