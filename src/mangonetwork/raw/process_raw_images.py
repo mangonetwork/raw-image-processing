@@ -123,7 +123,7 @@ class ImageProcessor:
         metadata = [r[2] for r in results]
         self.time = np.array([[md["start_time"], md["end_time"]] for md in metadata])
         self.ccd_temp = np.array([md["ccd_temp"] for md in metadata])
-        self.metadata["filenames"] = [md["filename"] for md in metadata]
+        self.metadata["filelist"] = [md["filename"] for md in metadata]
 
         logging.debug("Processing finished")
 
@@ -447,6 +447,9 @@ class ImageProcessor:
 
             pv = f.create_dataset("ProcessingInfo/PythonVersion", data=platform.python_version())
             pv.attrs["Description"] = "python version"
+
+            rf = f.create_dataset("ProcessingInfo/RawFileList", data=self.metadata["filelist"])
+            rf.attrs["Description"] = "list of raw files used to generate this dataset"
 
             with io.StringIO() as buffer:
                 self.config.write(buffer)
