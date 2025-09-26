@@ -334,6 +334,7 @@ class ImageProcessor:
             f.create_group("SiteInfo")
             f.create_group("ProcessingInfo")
             f.create_group("Coordinates")
+            f.create_group("DataQuality")
     
             t = f.create_dataset(
                 "UnixTime",
@@ -407,11 +408,6 @@ class ImageProcessor:
             mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
             mask.attrs["Size"] = "Ipixels x Jpixels"
     
-            ccd = f.create_dataset("CCDTemperature", data=self.ccd_temp)
-            ccd.attrs["Description"] = "Temperature of CCD"
-            ccd.attrs["Size"] = "Nrecords"
-            ccd.attrs["Unit"] = "degrees C"
-
             back = f.create_dataset("Background", data=self.background)
             back.attrs["Description"] = "Background brightness estimation from corners"
             back.attrs["Size"] = "Nrecords"
@@ -432,6 +428,11 @@ class ImageProcessor:
             coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
             coord.attrs["Unit"] = "degrees"
     
+            ccd = f.create_dataset("DataQuality/CCDTemperature", data=self.ccd_temp)
+            ccd.attrs["Description"] = "Temperature of CCD"
+            ccd.attrs["Size"] = "Nrecords"
+            ccd.attrs["Unit"] = "degrees C"
+
             ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
             ec.attrs["Description"] = "elevation angle cutoff [deg]"
     
