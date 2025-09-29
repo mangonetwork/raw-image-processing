@@ -601,17 +601,16 @@ def main():
 
     if args.config:
         logging.debug("Alternate configuration file: %s", args.config)
-        if not os.path.exists(args.config):
+        if os.path.exists(args.config):
+            config_file = args.config
+        else:
             logging.error("Config file not found")
             sys.exit(1)
-        with open(args.config, encoding="utf-8") as f:
-            contents = f.read()
     else:
-        contents = find_config(inputs[0])
+        config_file = find_config(inputs[0])
 
     config = configparser.ConfigParser()
-    #config.read_string(contents)
-    config.read(contents)
+    config.read(config_file)
 
     ## Make whether or not to multiprocess an option
     #with multiprocessing.Pool(
