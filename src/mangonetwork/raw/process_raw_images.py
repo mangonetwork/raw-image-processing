@@ -103,12 +103,12 @@ class ImageProcessor:
 
         return image, background, metadata
 
-    def run(self, filelist, numproc=2, nopool=False):
+    def run(self, filelist, numproc=2, seq=False):
         """Run processing on all input files"""
 
         logging.debug("Processing Images")
 
-        if nopool:
+        if seq:
             # Process files sequentially in a for loop (primarilly for development)
             results = list()
             for filename in filelist:
@@ -525,7 +525,17 @@ def parse_args():
         help="Output filename (default is mango.hdf5)",
     )
     parser.add_argument(
-        "-n", "--numproc", type=int, default=1, help="Number of parallel processes"
+        "-n", 
+        "--numproc", 
+        type=int, 
+        default=1, 
+        help="Number of parallel processes"
+    )
+    parser.add_argument(
+        "-s", 
+        "--sequential", 
+        action="store_true", 
+        help="Process images sequentially without multiprocessing"
     )
     parser.add_argument(
         "-v",
@@ -625,7 +635,7 @@ def main():
 
     processor = ImageProcessor(config)
     processor.setup(inputs[0])
-    processor.run(inputs, numproc=args.numproc)
+    processor.run(inputs, numproc=args.numproc, seq=args.sequential)
     output_file = pathlib.Path(args.output)
     processor.write_to_hdf5(output_file)
 
