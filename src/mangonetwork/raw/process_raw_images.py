@@ -58,6 +58,7 @@ class ImageProcessor:
         ha = self.config.getfloat("PROCESSING", "ALTITUDE")
         self.REha = RE + ha
         self.elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        self.remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 
         # Results
 
@@ -100,6 +101,9 @@ class ImageProcessor:
         background = self.estimate_background(raw_image)
 
         image = self.regrid_image(raw_image)
+
+        if self.remove_background:
+            image = image - background
 
         return image, background, metadata
 
@@ -193,6 +197,15 @@ class ImageProcessor:
             np.linspace(-d, d, new_i_max), np.linspace(-d, d, new_j_max)
         )
 
+#        plt.scatter(self.trans_x_grid, self.trans_y_grid, s=0.5)
+#        plt.scatter(self.new_x_grid, self.new_y_grid, s=0.5)
+#        plt.axvline(-d, color='magenta')
+#        plt.axvline(d, color='magenta')
+#        plt.axhline(-d, color='magenta')
+#        plt.axhline(d, color='magenta')
+#        plt.show()
+
+
 
     # pylint: disable=too-many-arguments, too-many-locals
 
@@ -263,9 +276,15 @@ class ImageProcessor:
         self.latitude = lat * 180.0 / np.pi
         self.longitude = lon * 180.0 / np.pi
 
-
+#        plt.scatter(self.trans_x_grid, self.trans_y_grid, s=0.5, c='k')
+#        c = plt.scatter(self.new_x_grid, self.new_y_grid, s=0.5, c=self.elevation, cmap='bwr', vmin=0., vmax=30.)
+#        plt.colorbar(c)
+#        plt.show()
 
     def estimate_background(self, image):
+
+        image = np.array(image, dtype=float)
+        #image[image>30000.] = np.nan
     
         # Offset from edge of image and size of region for determining the background in each corner of image
         offx = int(0.015*image.shape[1])
@@ -273,19 +292,64 @@ class ImageProcessor:
         offy = int(0.015*image.shape[0])
         sizey = int(0.05*image.shape[0])
 
-        ## May be able to make a better estimate from the mask at the el=0 level 
-        #x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-        #y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-        #rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-        #xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
-        #mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+
+        #print('NUMBER PIXELS', sizex*sizey)
+
+        # CCD correction - rename "background"
+        # Look up "missing value" for hdf5
+
     
         # Calculate means in the four corners
-        m1 = image[offy:offy+sizey, offx:offx+sizex].mean()
-        m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].mean()
-        m3 = image[offy:offy+sizey, -(offx+sizex):-offx].mean()
-        m4 = image[-(offy+sizey):-offy, offx:offx+sizex].mean()
+        #m1 = image[offy:offy+sizey, offx:offx+sizex].nanmean()
+        #m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].nanmean()
+        #m3 = image[offy:offy+sizey, -(offx+sizex):-offx].nanmean()
+        #m4 = image[-(offy+sizey):-offy, offx:offx+sizex].nanmean()
+        m1 = np.nanmean(image[offy:offy+sizey, offx:offx+sizex])
+        m2 = np.nanmean(image[-(offy+sizey):-offy, -(offx+sizex):-offx])
+        m3 = np.nanmean(image[offy:offy+sizey, -(offx+sizex):-offx])
+        m4 = np.nanmean(image[-(offy+sizey):-offy, offx:offx+sizex])
         m = np.mean([m1,m2,m3,m4])
+
+
+#        #fig, ax = plt.subplots()
+#        #ax.imshow(image)
+#        #ax.axvline(offx)
+#        #ax.axvline(offx+sizex)
+#        #ax.axhline(offy)
+#        #ax.axhline(offy+sizey)
+#        #plt.show()
+#
+#
+#
+#        # May be able to make a better estimate from the mask at the el=0 level 
+#        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+#        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+#        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+#        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
+#        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+#
+#        fig, ax = plt.subplots()
+#        bins = np.arange(0., 1000., 10.)
+#        ct, bn, _ = ax.hist(image[mask], bins=bins, color='lightgrey', zorder=1)
+#        inttot = np.sum(np.diff(bn)*ct)
+#
+#        ax2 = ax.twinx()
+#        ax2.hist(image[offy:offy+sizey, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
+#        ax2.hist(image[-(offy+sizey):-offy, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
+#        ax2.hist(image[offy:offy+sizey, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
+#        ax2.hist(image[-(offy+sizey):-offy, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
+#
+#        ax.axvline(m, color='k', linestyle=':')
+#        ax.axvline(np.nanmean(image[mask]), color='grey')
+#
+#        print(np.nanmin(image[mask]), np.nanmax(image[mask]))
+#
+#        from scipy.stats import poisson
+#        rv = poisson(np.nanmean(image[mask]))
+#        k = np.arange(200, 600, 1)
+#        ax.plot(k, rv.pmf(k)*inttot, color='hotpink')
+#
+#        plt.show()
 
         return m
 
@@ -309,7 +373,20 @@ class ImageProcessor:
             cooked_image.flatten(),
             (self.new_x_grid, self.new_y_grid),
             fill_value=0,
+            method='linear'
         )   # THIS
+
+#        fig = plt.figure()
+#        ax = fig.add_subplot(121)
+#        ax.scatter(self.trans_x_grid, self.trans_y_grid, c=cooked_image, s=0.5)
+#        d = self.unwarp(self.elev_cutoff * np.pi / 180.0)
+#        ax.axvline(-d, color='magenta')
+#        ax.axvline(d, color='magenta')
+#        ax.axhline(-d, color='magenta')
+#        ax.axhline(d, color='magenta')
+#        ax = fig.add_subplot(122)
+#        ax.scatter(self.new_x_grid, self.new_y_grid, c=new_image, s=0.5)
+#        plt.show()
 
         return new_image
 
@@ -393,7 +470,7 @@ class ImageProcessor:
             images = f.create_dataset(
                 "ImageData",
                 #data=np.array([rec.image for rec in results]),
-                data=self.image_data,
+                data=self.image_data.astype('uint16'),
                 compression="gzip",
                 compression_opts=1,
             )
@@ -401,6 +478,7 @@ class ImageProcessor:
             images.attrs["Size"] = "Nrecords x Ipixels x Jpixels"
             images.attrs["station"] = self.metadata["station"]
             images.attrs["instrument"] = self.metadata["instrument"]
+            images.attrs["remove_background"] = self.remove_background
     
             mask = f.create_dataset(
                 "Mask", data=self.image_mask, compression="gzip", compression_opts=1
@@ -521,8 +599,8 @@ def parse_args():
     parser.add_argument(
         "-o",
         "--output",
-        default="mango-raw.hdf5",
-        help="Output filename (default is mango.hdf5)",
+        default="mango-l1.hdf5",
+        help="Output filename (default is mango-l1.hdf5)",
     )
     parser.add_argument(
         "-n", 
