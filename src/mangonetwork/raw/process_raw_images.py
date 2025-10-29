@@ -283,8 +283,9 @@ class ImageProcessor:
 
     def estimate_background(self, image):
 
-        image = np.array(image, dtype=float)
-        #image[image>30000.] = np.nan
+        #image = np.array(image, dtype=float)
+        #image[image>10000.] = np.nan
+        tstmp = dt.datetime.utcfromtimestamp(image.attrs['start_time'])
     
         # Offset from edge of image and size of region for determining the background in each corner of image
         offx = int(0.015*image.shape[1])
@@ -311,45 +312,86 @@ class ImageProcessor:
         m = np.mean([m1,m2,m3,m4])
 
 
-#        #fig, ax = plt.subplots()
-#        #ax.imshow(image)
-#        #ax.axvline(offx)
-#        #ax.axvline(offx+sizex)
-#        #ax.axhline(offy)
-#        #ax.axhline(offy+sizey)
-#        #plt.show()
-#
-#
-#
-#        # May be able to make a better estimate from the mask at the el=0 level 
-#        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-#        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-#        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-#        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
-#        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
-#
-#        fig, ax = plt.subplots()
-#        bins = np.arange(0., 1000., 10.)
-#        ct, bn, _ = ax.hist(image[mask], bins=bins, color='lightgrey', zorder=1)
-#        inttot = np.sum(np.diff(bn)*ct)
-#
+        #fig, ax = plt.subplots()
+        #ax.imshow(image)
+        #ax.axvline(offx)
+        #ax.axvline(offx+sizex)
+        #ax.axhline(offy)
+        #ax.axhline(offy+sizey)
+        #plt.show()
+
+
+
+        # May be able to make a better estimate from the mask at the el=0 level 
+        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
+        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+
+        masked_image = image[mask]
+
+        fig, ax = plt.subplots(figsize=(8,6))
+        x = np.arange(200, 600, 2)
+        ct, bn, _ = ax.hist(masked_image, bins=x, density=True, color='lightgrey', zorder=1)
+
+        #print('EVEN:', len(image[image.astype(int)%2==0]))
+        #print('ODD:', len(image[image.astype(int)%2==1]))
+        #print('RATIO:', len(image[image.astype(int)%2==1])/len(image[image.astype(int)%2==0]))
+        #inttot = np.sum(np.diff(bn)*ct)
+
 #        ax2 = ax.twinx()
 #        ax2.hist(image[offy:offy+sizey, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
 #        ax2.hist(image[-(offy+sizey):-offy, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
 #        ax2.hist(image[offy:offy+sizey, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
 #        ax2.hist(image[-(offy+sizey):-offy, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
-#
-#        ax.axvline(m, color='k', linestyle=':')
-#        ax.axvline(np.nanmean(image[mask]), color='grey')
-#
-#        print(np.nanmin(image[mask]), np.nanmax(image[mask]))
-#
-#        from scipy.stats import poisson
-#        rv = poisson(np.nanmean(image[mask]))
-#        k = np.arange(200, 600, 1)
-#        ax.plot(k, rv.pmf(k)*inttot, color='hotpink')
-#
-#        plt.show()
+
+
+        mu0 = np.nanmean(masked_image)
+        sig0 = np.nanstd(masked_image)
+        med0 = np.nanmedian(masked_image)
+        label = 'ALL\n'rf'$\mu$ = {mu0:.2f}''\n'rf'$\sigma$ = {sig0:.2f}''\n'rf'M = {med0:.1f}'
+        ax.text(0.8, 0.8, label, transform=ax.transAxes)
+
+        mu = np.nanmean(masked_image[masked_image<30000])
+        sig = np.nanstd(masked_image[masked_image<30000])
+        med = np.nanmedian(masked_image[masked_image<30000])
+        label = '<30000\n'rf'$\mu$ = {mu:.2f}''\n'rf'$\sigma$ = {sig:.2f}''\n'rf'M = {med:.1f}'
+        ax.text(0.8, 0.6, label, transform=ax.transAxes)
+
+        mu = np.nanmean(masked_image[masked_image<1000])
+        sig = np.nanstd(masked_image[masked_image<1000])
+        med = np.nanmedian(masked_image[masked_image<1000])
+        label = '<1000\n'rf'$\mu$ = {mu:.2f}''\n'rf'$\sigma$ = {sig:.2f}''\n'rf'M = {med:.1f}'
+        ax.text(0.8, 0.4, label, transform=ax.transAxes)
+
+        ax.axvline(med0, color='royalblue', label='median')
+        ax.axvline(mu, color='orange', linestyle='--', label='mean (<1000)')
+        ax.axvline(mu0, color='k', linestyle=':', label='mean')
+        #ax.axvline(np.nanmean(image[mask]), color='grey')
+
+        #x = np.arange(200, 600, 1)
+        from scipy.stats import norm, poisson
+        #r = sig-mu
+        #print(r)
+        rv = poisson(mu)
+        ax.plot(x, rv.pmf(x), color='hotpink', label='Poisson')
+        #rv = poisson_binom(mu)
+        #ax.plot(x, rv.pmf(x), color='lightgreen')
+        rv = norm(loc=mu, scale=sig)
+        ax.plot(x, rv.pdf(x), color='limegreen', label='Normal')
+
+        ax.set_xlabel('Pixel Brightness')
+        ax.set_ylabel('Count Density')
+        station = self.metadata['station']
+        instrument = self.metadata['instrument']
+        ax.set_title(f'{station.upper()} {instrument} {tstmp.isoformat()}')
+
+        ax.legend()
+
+        plt.savefig(f'background_histograms/background_histogram_{station}_{instrument}_{tstmp:%Y%m%d_%H%M%S}.png')
+        #plt.show()
+        plt.close()
 
         return m
 
