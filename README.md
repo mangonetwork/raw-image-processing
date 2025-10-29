@@ -59,3 +59,18 @@ The starcal files contain lists of stars and their coordinates in an image that 
 
 ### config
 The config file contains all information needed to run `mango-process-raw-images` and `mango-quicklook-movies`.  The `CALIBRATION_PARAMS` section is filled automatically by `mango-calibrate`.  The `PROCESSING` section contains site metadata and specific parameters needed to process images. The `QUICKLOOK` section contains a rotation angle entered manually so quicklook movies can be created before the camera is calibrated.
+
+## Collecting Data
+This package operates on data posted in the [MANGO Database](https://data.mangonetwork.org/data/transport/mango/archive/).  Individual data files can be browsed and downloaded in a browser, but it may be useful to bulk download the days you're interested in with [wget](https://www.gnu.org/software/wget/).
+
+Download a singe day's worth of data mimicing the directory structure of the online database:
+```
+wget -r -np -nH --cut-dir 8 -R "index.html*" -R "*.png" https://data.mangonetwork.org/data/transport/mango/archive/<site>/<instrument>/raw/<year>/<doy>/
+```
+
+To only download hdf5 files, add the `-R "*.png"` flag.  To only download png files, add the `-R "*.hdf5"` flag.
+
+To generate a filelist text file, run the following:
+```
+ls /path/to/local/mango/archive/<site>/<instrument>/raw/<year>/<doy>/??/*.hdf5
+```

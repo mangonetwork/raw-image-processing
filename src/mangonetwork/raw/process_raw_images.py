@@ -23,17 +23,24 @@ import multiprocessing
 import pathlib
 import os
 import sys
+import platform
+import io
+#import time
+import datetime as dt
 
 import h5py
 import numpy as np
 from scipy.interpolate import griddata
 
-from . import imageops
+
+import matplotlib.pyplot as plt
 
 if sys.version_info < (3, 9):
     import importlib_resources as resources
+    import importlib_metadata as metadata
 else:
     from importlib import resources
+    from importlib import metadata
 
 RE = 6371.0  # Earth radius (m)
 
@@ -43,50 +50,101 @@ RE = 6371.0  # Earth radius (m)
 
 
 class ImageProcessor:
-    """Process a single image"""
+    """Process a set image to produce a nightly file"""
 
     def __init__(self, config):
         self.config = config
 
         ha = self.config.getfloat("PROCESSING", "ALTITUDE")
         self.REha = RE + ha
+        self.elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        self.remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 
         # Results
 
-        self.image = None
-        self.metadata = None
-        self.azimuth = None
-        self.elevation = None
-        self.latitude = None
-        self.longitude = None
-        self.image_mask = None
-        self.vanrhijn_factor = None
-        self.extinction_factor = None
-        self.new_x_grid = None
-        self.new_y_grid = None
-        self.trans_x_grid = None
-        self.trans_y_grid = None
+        #self.image = None
+        #self.metadata = None
+        #self.azimuth = None
+        #self.elevation = None
+        #self.latitude = None
+        #self.longitude = None
+        #self.image_mask = None
+        #self.vanrhijn_factor = None
+        #self.extinction_factor = None
+        #self.new_x_grid = None
+        #self.new_y_grid = None
+        #self.trans_x_grid = None
+        #self.trans_y_grid = None
 
-    def run(self, filename):
-        """Run processing algorithm"""
+    def setup(self, filename):
+        """Setup the processing algorithm by collecting the time independent metadata and calculating the position arrays that will be constant over the entire night"""
 
-        logging.debug(filename)
+        logging.debug("Setup")
+
+        logging.debug(f"Extracting grid and metadata from: {filename}")
 
         raw_image = h5py.File(filename)["image"]
 
         self.metadata = self.get_metadata(raw_image)
-        self.metadata["filename"] = filename
 
         self.create_transform_grids(raw_image)
-        self.create_position_arrays(raw_image)
-        self.atmospheric_correction()
+        self.create_position_arrays()
 
-        self.image = self.process(raw_image)
+    def process(self, filename):
+        """Process individual images and extract time-dependent data"""
+
+        raw_image = h5py.File(filename)["image"]
+
+        metadata = self.get_time_metadata(raw_image)
+        metadata["filename"] = filename
+
+        background = self.estimate_background(raw_image)
+
+        image = self.regrid_image(raw_image)
+
+        if self.remove_background:
+            image = image - background
+
+        return image, background, metadata
+
+    def run(self, filelist, numproc=2, seq=False):
+        """Run processing on all input files"""
+
+        logging.debug("Processing Images")
+
+        if seq:
+            # Process files sequentially in a for loop (primarilly for development)
+            results = list()
+            for filename in filelist:
+                results.append(self.process(filename))
+        else:
+            # Process files with the multiprocessing module (much faster)
+            with multiprocessing.Pool(processes=numproc) as pool:
+                results = pool.map(self.process, filelist, chunksize=1)
+
+        self.image_data = np.array([r[0] for r in results])
+        self.background = np.array([r[1] for r in results])
+        metadata = [r[2] for r in results]
+        self.time = np.array([[md["start_time"], md["end_time"]] for md in metadata])
+        self.ccd_temp = np.array([md["ccd_temp"] for md in metadata])
+        self.metadata["filelist"] = [md["filename"] for md in metadata]
 
         logging.debug("Processing finished")
 
     def get_metadata(self, image):
         """Extract metadata"""
+
+        metadata = {}
+        metadata["station"] = image.attrs["station"]
+        metadata["instrument"] = image.attrs["instrument"]
+        metadata["label"] = image.attrs["label"]
+        metadata["site_lat"] = image.attrs["latitude"]
+        metadata["site_lon"] = image.attrs["longitude"]
+
+        return metadata
+
+    def get_time_metadata(self, image):
+        """Extract time-dependent metadata"""
 
         metadata = {}
 
@@ -96,12 +154,9 @@ class ImageProcessor:
         metadata["start_time"] = start_time
         metadata["end_time"] = start_time + exposure_time
         metadata["ccd_temp"] = image.attrs["ccd_temp"]
-        metadata["code"] = image.attrs["station"]
-        metadata["label"] = image.attrs["label"]
-        metadata["site_lat"] = image.attrs["latitude"]
-        metadata["site_lon"] = image.attrs["longitude"]
 
         return metadata
+
 
     def create_transform_grids(self, image):
         """Create transformation grids"""
@@ -124,7 +179,7 @@ class ImageProcessor:
         C = self.config.getfloat("CALIBRATION_PARAMS", "C")
         D = self.config.getfloat("CALIBRATION_PARAMS", "D")
 
-        elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        #elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
 
         # Create a grid and find the transformed coordinates of each grid point
 
@@ -136,11 +191,21 @@ class ImageProcessor:
 
         # Find unwarped distance to elevation cutoff and create new grid
 
-        d = self.unwarp(elev_cutoff * np.pi / 180.0)
+        d = self.unwarp(self.elev_cutoff * np.pi / 180.0)
 
         self.new_x_grid, self.new_y_grid = np.meshgrid(
             np.linspace(-d, d, new_i_max), np.linspace(-d, d, new_j_max)
         )
+
+#        plt.scatter(self.trans_x_grid, self.trans_y_grid, s=0.5)
+#        plt.scatter(self.new_x_grid, self.new_y_grid, s=0.5)
+#        plt.axvline(-d, color='magenta')
+#        plt.axvline(d, color='magenta')
+#        plt.axhline(-d, color='magenta')
+#        plt.axhline(d, color='magenta')
+#        plt.show()
+
+
 
     # pylint: disable=too-many-arguments, too-many-locals
 
@@ -156,6 +221,7 @@ class ImageProcessor:
 
         r = np.sqrt(x2**2 + y2**2)
         lam = A + B * r + C * r**2 + D * r**3
+
         d = self.unwarp(lam)
 
         x3 = d * x2 / r
@@ -172,13 +238,13 @@ class ImageProcessor:
 
         return d
 
-    def create_position_arrays(self, image):
+    def create_position_arrays(self):
         """Create position arrays"""
 
-        site_lat = image.attrs["latitude"] * np.pi / 180
-        site_lon = image.attrs["longitude"] * np.pi / 180
+        site_lat = self.metadata["site_lat"] * np.pi / 180
+        site_lon = self.metadata["site_lon"] * np.pi / 180
 
-        elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        #elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
 
         psi = np.sqrt(self.new_x_grid**2 + self.new_y_grid**2) / self.REha
 
@@ -189,8 +255,10 @@ class ImageProcessor:
 
         elv = np.pi / 2.0 - np.arccos(b / c) - psi
         azm = np.arctan2(self.new_x_grid, self.new_y_grid)
-        self.image_mask = elv < elev_cutoff * np.pi / 180.0
+        self.image_mask = elv < self.elev_cutoff * np.pi / 180.0
+        self.zero_mask = elv < 0.
 
+        # This should all be in a higher-level data product - altitude dependent
         # Use Haversine equations to find lat/lon of each point
 
         lat = np.arcsin(
@@ -208,120 +276,314 @@ class ImageProcessor:
         self.latitude = lat * 180.0 / np.pi
         self.longitude = lon * 180.0 / np.pi
 
+#        plt.scatter(self.trans_x_grid, self.trans_y_grid, s=0.5, c='k')
+#        c = plt.scatter(self.new_x_grid, self.new_y_grid, s=0.5, c=self.elevation, cmap='bwr', vmin=0., vmax=30.)
+#        plt.colorbar(c)
+#        plt.show()
 
-#    def atmospheric_correction(self, image, vanrhijn=True, extinction=True):
-#        """Apply atmospheric correction"""
-#
-#        # Atmospheric corrections are taken from Kubota et al., 2001
-#        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
-#        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
-#        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
-#
-#        # calculate zenith angle
-#
-#        za = np.pi / 2 - self.elevation * np.pi / 180.0
-#
-#        if vanrhijn:
-#
-#            # Kubota et al., 2001; eqn. 6
-#
-#            vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
-#
-#        else:
-#            
-#            vanrhijn_factor = np.ones(za.shape)
-#
-#
-#        if extinction:
-#
-#            # Kubota et al., 2001; eqn. 7,8
-#
-#            a = 0.2
-#            F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-#            extinction_factor = 10.0 ** (0.4 * a * F)
-#
-#        else:
-#
-#            extinction_factor = np.ones(za.shape)
-#
-#        correction = vanrhijn_factor * extinction_factor
-#
-#        return image * correction
+    def estimate_background(self, image):
 
-    def atmospheric_correction(self):
-        """Calculate atmospheric correction arrays"""
-
-        # Atmospheric corrections are taken from Kubota et al., 2001
-        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
-        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
-        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
-
-        # calculate zenith angle
-
-        za = np.pi / 2 - self.elevation * np.pi / 180.0
-
-        # Kubota et al., 2001; eqn. 6
-
-        self.vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
+        #image = np.array(image, dtype=float)
+        #image[image>10000.] = np.nan
+        tstmp = dt.datetime.utcfromtimestamp(image.attrs['start_time'])
+    
+        # Offset from edge of image and size of region for determining the background in each corner of image
+        offx = int(0.015*image.shape[1])
+        sizex = int(0.05*image.shape[1])
+        offy = int(0.015*image.shape[0])
+        sizey = int(0.05*image.shape[0])
 
 
-        # Kubota et al., 2001; eqn. 7,8
+        #print('NUMBER PIXELS', sizex*sizey)
 
-        a = 0.2
-        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-        self.extinction_factor = 10.0 ** (0.4 * a * F)
+        # CCD correction - rename "background"
+        # Look up "missing value" for hdf5
+
+    
+        # Calculate means in the four corners
+        #m1 = image[offy:offy+sizey, offx:offx+sizex].nanmean()
+        #m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].nanmean()
+        #m3 = image[offy:offy+sizey, -(offx+sizex):-offx].nanmean()
+        #m4 = image[-(offy+sizey):-offy, offx:offx+sizex].nanmean()
+        m1 = np.nanmean(image[offy:offy+sizey, offx:offx+sizex])
+        m2 = np.nanmean(image[-(offy+sizey):-offy, -(offx+sizex):-offx])
+        m3 = np.nanmean(image[offy:offy+sizey, -(offx+sizex):-offx])
+        m4 = np.nanmean(image[-(offy+sizey):-offy, offx:offx+sizex])
+        m = np.mean([m1,m2,m3,m4])
+
+
+        #fig, ax = plt.subplots()
+        #ax.imshow(image)
+        #ax.axvline(offx)
+        #ax.axvline(offx+sizex)
+        #ax.axhline(offy)
+        #ax.axhline(offy+sizey)
+        #plt.show()
 
 
 
-    def process(self, raw_image):
+        # May be able to make a better estimate from the mask at the el=0 level 
+        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
+        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+
+        masked_image = image[mask]
+
+        fig, ax = plt.subplots(figsize=(8,6))
+        x = np.arange(200, 600, 2)
+        ct, bn, _ = ax.hist(masked_image, bins=x, density=True, color='lightgrey', zorder=1)
+
+        #print('EVEN:', len(image[image.astype(int)%2==0]))
+        #print('ODD:', len(image[image.astype(int)%2==1]))
+        #print('RATIO:', len(image[image.astype(int)%2==1])/len(image[image.astype(int)%2==0]))
+        #inttot = np.sum(np.diff(bn)*ct)
+
+#        ax2 = ax.twinx()
+#        ax2.hist(image[offy:offy+sizey, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
+#        ax2.hist(image[-(offy+sizey):-offy, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
+#        ax2.hist(image[offy:offy+sizey, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
+#        ax2.hist(image[-(offy+sizey):-offy, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
+
+
+        mu0 = np.nanmean(masked_image)
+        sig0 = np.nanstd(masked_image)
+        med0 = np.nanmedian(masked_image)
+        label = 'ALL\n'rf'$\mu$ = {mu0:.2f}''\n'rf'$\sigma$ = {sig0:.2f}''\n'rf'M = {med0:.1f}'
+        ax.text(0.8, 0.8, label, transform=ax.transAxes)
+
+        mu = np.nanmean(masked_image[masked_image<30000])
+        sig = np.nanstd(masked_image[masked_image<30000])
+        med = np.nanmedian(masked_image[masked_image<30000])
+        label = '<30000\n'rf'$\mu$ = {mu:.2f}''\n'rf'$\sigma$ = {sig:.2f}''\n'rf'M = {med:.1f}'
+        ax.text(0.8, 0.6, label, transform=ax.transAxes)
+
+        mu = np.nanmean(masked_image[masked_image<1000])
+        sig = np.nanstd(masked_image[masked_image<1000])
+        med = np.nanmedian(masked_image[masked_image<1000])
+        label = '<1000\n'rf'$\mu$ = {mu:.2f}''\n'rf'$\sigma$ = {sig:.2f}''\n'rf'M = {med:.1f}'
+        ax.text(0.8, 0.4, label, transform=ax.transAxes)
+
+        ax.axvline(med0, color='royalblue', label='median')
+        ax.axvline(mu, color='orange', linestyle='--', label='mean (<1000)')
+        ax.axvline(mu0, color='k', linestyle=':', label='mean')
+        #ax.axvline(np.nanmean(image[mask]), color='grey')
+
+        #x = np.arange(200, 600, 1)
+        from scipy.stats import norm, poisson
+        #r = sig-mu
+        #print(r)
+        rv = poisson(mu)
+        ax.plot(x, rv.pmf(x), color='hotpink', label='Poisson')
+        #rv = poisson_binom(mu)
+        #ax.plot(x, rv.pmf(x), color='lightgreen')
+        rv = norm(loc=mu, scale=sig)
+        ax.plot(x, rv.pdf(x), color='limegreen', label='Normal')
+
+        ax.set_xlabel('Pixel Brightness')
+        ax.set_ylabel('Count Density')
+        station = self.metadata['station']
+        instrument = self.metadata['instrument']
+        ax.set_title(f'{station.upper()} {instrument} {tstmp.isoformat()}')
+
+        ax.legend()
+
+        plt.savefig(f'background_histograms/background_histogram_{station}_{instrument}_{tstmp:%Y%m%d_%H%M%S}.png')
+        #plt.show()
+        plt.close()
+
+        return m
+
+
+
+    #def process(self, raw_image):
+    def regrid_image(self, raw_image):
         """Processing algorithm"""
 
-        elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-        remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
-        contrast = self.config.getfloat("PROCESSING", "CONTRAST", fallback=100)
-        histequal = self.config.getboolean("PROCESSING", "EQUALIZATION", fallback=False)
-        vanrhijn = self.config.getboolean("PROCESSING", "VANRHIJN")
-        extinction = self.config.getboolean("PROCESSING", "EXTINCTION")
-        uint8_out = self.config.getboolean("PROCESSING", "UINT8_OUT", fallback=False)
+        #elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
 
         cooked_image = np.array(raw_image)
 
-        # Does it matter which of these operations is performed first?
-        if remove_background:
-            cooked_image = imageops.background_removal(cooked_image)
+        # WHAT REALLY NEEDS TO BE MULTIPROCESSED?
+        #background = self.estimate_background(cooked_image) # THIS
 
-        if histequal:
-            cooked_image = imageops.equalize(cooked_image, contrast)
+        # COLLECTING TIME-DEPENDENT METADATA
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
             cooked_image.flatten(),
             (self.new_x_grid, self.new_y_grid),
             fill_value=0,
-        )
+            method='linear'
+        )   # THIS
 
-        # Apply atmopsheric correction
-        if vanrhijn:
-            new_image *= self.vanrhijn_factor
-
-        if extinction:
-            new_image *= self.extinction_factor
-
-        #new_image = self.atmospheric_correction(
-        #    new_image, vanrhijn=vanrhijn, extinction=extinction
-        #)
-
-        # Apply mask outside elevation cutoff
-
-        new_image[self.elevation < elev_cutoff] = 0.0
-
-        # Renormalize each image and convert to int
-
-        if uint8_out:
-           new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
+#        fig = plt.figure()
+#        ax = fig.add_subplot(121)
+#        ax.scatter(self.trans_x_grid, self.trans_y_grid, c=cooked_image, s=0.5)
+#        d = self.unwarp(self.elev_cutoff * np.pi / 180.0)
+#        ax.axvline(-d, color='magenta')
+#        ax.axvline(d, color='magenta')
+#        ax.axhline(-d, color='magenta')
+#        ax.axhline(d, color='magenta')
+#        ax = fig.add_subplot(122)
+#        ax.scatter(self.new_x_grid, self.new_y_grid, c=new_image, s=0.5)
+#        plt.show()
 
         return new_image
 
+
+    def write_to_hdf5(self, output_file):
+        """Save results to an HDF5 file"""
+    
+        site_name = self.config.get("SITE_INFO", "SITE_NAME")
+        bright_alt = self.config.getfloat("PROCESSING", "ALTITUDE")
+        elevcutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+    
+        #start_time = [rec.metadata["start_time"] for rec in results]
+        #end_time = [rec.metadata["end_time"] for rec in results]
+        #ccd_temp = [rec.metadata["ccd_temp"] for rec in results]
+        #background = [rec.background for rec in results]
+    
+        #rec = results[0]
+    
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+        with h5py.File(output_file, "w") as f:
+            f.create_group("SiteInfo")
+            f.create_group("ProcessingInfo")
+            f.create_group("Coordinates")
+            f.create_group("DataQuality")
+    
+            t = f.create_dataset(
+                "UnixTime",
+                #data=np.array([start_time, end_time]),
+                data=self.time,
+                compression="gzip",
+                compression_opts=1,
+            )
+            t.attrs["Description"] = "unix time stamp"
+            t.attrs["Size"] = "Nrecords"
+            t.attrs["Unit"] = "seconds"
+    
+            lat = f.create_dataset(
+                "Coordinates/Latitude", data=self.latitude, compression="gzip", compression_opts=1
+            )
+            lat.attrs["Description"] = "geodetic latitude of each pixel"
+            lat.attrs["Size"] = "Ipixels x Jpixels"
+            lat.attrs["Projection Altitude"] = bright_alt
+            lat.attrs["Unit"] = "degrees"
+    
+            lon = f.create_dataset(
+                "Coordinates/Longitude", data=self.longitude, compression="gzip", compression_opts=1
+            )
+            lon.attrs["Description"] = "geodetic longitude of each pixel"
+            lon.attrs["Size"] = "Ipixels x Jpixels"
+            lon.attrs["Projection Altitude"] = bright_alt
+            lon.attrs["Unit"] = "degrees"
+    
+            az = f.create_dataset(
+                "Coordinates/Azimuth", data=self.azimuth, compression="gzip", compression_opts=1
+            )
+            az.attrs["Description"] = "azimuth of each pixel"
+            az.attrs["Size"] = "Ipixels x Jpixels"
+            az.attrs["Unit"] = "degrees"
+    
+            el = f.create_dataset(
+                "Coordinates/Elevation", data=self.elevation, compression="gzip", compression_opts=1
+            )
+            el.attrs["Description"] = "elevation of each pixel"
+            el.attrs["Size"] = "Ipixels x Jpixels"
+            el.attrs["Unit"] = "degrees"
+    
+            pc = f.create_dataset(
+                "Coordinates/PixelCoordinates",
+                data=np.array([self.new_x_grid, self.new_y_grid]),
+                compression="gzip",
+                compression_opts=1,
+            )
+            pc.attrs[
+                "Description"
+            ] = "coordinates of each pixel in grid at the airglow altitude"
+            pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
+            pc.attrs["Projection Altitude"] = bright_alt
+            pc.attrs["Unit"] = "km"
+    
+            images = f.create_dataset(
+                "ImageData",
+                #data=np.array([rec.image for rec in results]),
+                data=self.image_data.astype('uint16'),
+                compression="gzip",
+                compression_opts=1,
+            )
+            images.attrs["Description"] = "pixel values for images"
+            images.attrs["Size"] = "Nrecords x Ipixels x Jpixels"
+            images.attrs["station"] = self.metadata["station"]
+            images.attrs["instrument"] = self.metadata["instrument"]
+            images.attrs["remove_background"] = self.remove_background
+    
+            mask = f.create_dataset(
+                "Mask", data=self.image_mask, compression="gzip", compression_opts=1
+            )
+            mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
+            mask.attrs["Size"] = "Ipixels x Jpixels"
+    
+            back = f.create_dataset("Background", data=self.background)
+            back.attrs["Description"] = "Background brightness estimation from corners"
+            back.attrs["Size"] = "Nrecords"
+    
+            name = f.create_dataset("SiteInfo/Name", data=site_name)
+            name.attrs["Description"] = "site name"
+    
+            code = f.create_dataset("SiteInfo/Code", data=self.metadata["station"])
+            code.attrs["Description"] = "three letter site abbreviation/code"
+    
+            code = f.create_dataset("SiteInfo/Instrument", data=self.metadata["label"])
+            code.attrs["Description"] = "type of instrument"
+    
+            coord = f.create_dataset(
+                "SiteInfo/Coordinates",
+                data=[self.metadata["site_lat"], self.metadata["site_lon"]],
+            )
+            coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
+            coord.attrs["Unit"] = "degrees"
+    
+            ccd = f.create_dataset("DataQuality/CCDTemperature", data=self.ccd_temp)
+            ccd.attrs["Description"] = "Temperature of CCD"
+            ccd.attrs["Size"] = "Nrecords"
+            ccd.attrs["Unit"] = "degrees C"
+
+            ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
+            ec.attrs["Description"] = "elevation angle cutoff [deg]"
+    
+            ha = f.create_dataset("ProcessingInfo/Altitude", data=bright_alt)
+            ha.attrs["Description"] = "assumed altitude of brightness layer [km]"
+
+            timestamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ts = f.create_dataset("ProcessingInfo/TimeStamp", data=timestamp)
+            ts.attrs["Description"] = "timestamp when this file was processed"
+
+            ver = f.create_dataset("ProcessingInfo/Version", data=metadata.version("mangonetwork-raw"))
+            ver.attrs["Description"] = "version of processing code"
+
+            pv = f.create_dataset("ProcessingInfo/PythonVersion", data=platform.python_version())
+            pv.attrs["Description"] = "python version"
+
+            rf = f.create_dataset("ProcessingInfo/RawFileList", data=self.metadata["filelist"])
+            rf.attrs["Description"] = "list of raw files used to generate this dataset"
+
+            with io.StringIO() as buffer:
+                self.config.write(buffer)
+                config_str = buffer.getvalue()
+            cfg = f.create_dataset("ProcessingInfo/ConfigFile", data=config_str)
+            cfg.attrs["Description"] = "full text of config file"
+
+            f.create_group("ProcessingInfo/PlatformInfo")
+            f.create_dataset("ProcessingInfo/PlatformInfo/MachineType", data=platform.machine())
+            f.create_dataset("ProcessingInfo/PlatformInfo/System", data=platform.system())
+            f.create_dataset("ProcessingInfo/PlatformInfo/Release", data=platform.release())
+            f.create_dataset("ProcessingInfo/PlatformInfo/Version", data=platform.version())
+            f.create_dataset("ProcessingInfo/PlatformInfo/HostName", data=platform.node())
 
 # -------------------------------------------------------------------------
 # Application methods
@@ -330,162 +592,31 @@ class ImageProcessor:
 # pylint: disable=too-many-statements, too-many-locals
 
 
-def write_to_hdf5(output_file, config, results):
-    """Save results to an HDF5 file"""
-
-    site_name = config.get("SITE_INFO", "SITE_NAME")
-    ha = config.getfloat("PROCESSING", "ALTITUDE")
-    elevcutoff = config.getfloat("PROCESSING", "ELEVCUTOFF")
-    backremove = config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
-    contrast = config.getfloat("PROCESSING", "CONTRAST", fallback=100)
-    histequal = config.getboolean("PROCESSING", "EQUALIZATION")
-    vanrhijn = config.getboolean("PROCESSING", "VANRHIJN")
-    extinction = config.getboolean("PROCESSING", "EXTINCTION")
-
-    start_time = [rec.metadata["start_time"] for rec in results]
-    end_time = [rec.metadata["end_time"] for rec in results]
-    ccd_temp = [rec.metadata["ccd_temp"] for rec in results]
-
-    rec = results[0]
-
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    with h5py.File(output_file, "w") as f:
-        f.create_group("SiteInfo")
-        f.create_group("ProcessingInfo")
-
-        t = f.create_dataset(
-            "UnixTime",
-            data=np.array([start_time, end_time]),
-            compression="gzip",
-            compression_opts=1,
-        )
-        t.attrs["Description"] = "unix time stamp"
-        t.attrs["Unit"] = "seconds"
-
-        lat = f.create_dataset(
-            "Latitude", data=rec.latitude, compression="gzip", compression_opts=1
-        )
-        lat.attrs["Description"] = "geodetic latitude of each pixel"
-        lat.attrs["Size"] = "Ipixels x Jpixels"
-        lat.attrs["Projection Altitude"] = ha
-        lat.attrs["Unit"] = "degrees"
-
-        lon = f.create_dataset(
-            "Longitude", data=rec.longitude, compression="gzip", compression_opts=1
-        )
-        lon.attrs["Description"] = "geodetic longitude of each pixel"
-        lon.attrs["Size"] = "Ipixels x Jpixels"
-        lon.attrs["Projection Altitude"] = ha
-        lon.attrs["Unit"] = "degrees"
-
-        az = f.create_dataset(
-            "Azimuth", data=rec.azimuth, compression="gzip", compression_opts=1
-        )
-        az.attrs["Description"] = "azimuth of each pixel"
-        az.attrs["Size"] = "Ipixels x Jpixels"
-        az.attrs["Unit"] = "degrees"
-
-        el = f.create_dataset(
-            "Elevation", data=rec.elevation, compression="gzip", compression_opts=1
-        )
-        el.attrs["Description"] = "elevation of each pixel"
-        el.attrs["Size"] = "Ipixels x Jpixels"
-        el.attrs["Unit"] = "degrees"
-
-        pc = f.create_dataset(
-            "PixelCoordinates",
-            data=np.array([rec.new_x_grid, rec.new_y_grid]),
-            compression="gzip",
-            compression_opts=1,
-        )
-        pc.attrs[
-            "Description"
-        ] = "coordinates of each pixel in grid at the airglow altitude"
-        pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
-        pc.attrs["Projection Altitude"] = ha
-        pc.attrs["Unit"] = "km"
-
-        images = f.create_dataset(
-            "ImageData",
-            data=np.array([rec.image for rec in results]),
-            compression="gzip",
-            compression_opts=1,
-        )
-        images.attrs["Description"] = "pixel values for images"
-        images.attrs["Site Abbreviation"] = rec.metadata["code"]
-        images.attrs["Image label"] = rec.metadata["label"]
-
-        vr = f.create_dataset(
-            "VanRhijnFactor", data=rec.vanrhijn_factor, compression="gzip", compression_opts=1
-        )
-        vr.attrs["Description"] = "Van Rhijn correction factor for each image in ImageData array"
-
-        ef = f.create_dataset(
-            "ExtinctionFactor", data=rec.extinction_factor, compression="gzip", compression_opts=1
-        )
-        ef.attrs["Description"] = "Extinction factor for each image in ImageData array"
-
-        mask = f.create_dataset(
-            "Mask", data=rec.image_mask, compression="gzip", compression_opts=1
-        )
-        mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
-
-        ccd = f.create_dataset("CCDTemperature", data=ccd_temp)
-        ccd.attrs["Description"] = "Temperature of CCD"
-        ccd.attrs["Unit"] = "degrees C"
-
-        name = f.create_dataset("SiteInfo/Name", data=site_name)
-        name.attrs["Description"] = "site name"
-
-        code = f.create_dataset("SiteInfo/Code", data=rec.metadata["code"])
-        code.attrs["Description"] = "one letter site abbreviation/code"
-
-        coord = f.create_dataset(
-            "SiteInfo/Coordinates",
-            data=[rec.metadata["site_lat"], rec.metadata["site_lon"]],
-        )
-        coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
-        coord.attrs["Unit"] = "degrees"
-
-        ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
-        ec.attrs["Description"] = "elevation angle cutoff [deg]"
-
-        cont = f.create_dataset("ProcessingInfo/Contrast", data=contrast)
-        cont.attrs["Description"] = "contrast value used for histogram equalization"
-
-        he = f.create_dataset("ProcessingInfo/HistogramEqualization", data=histequal)
-        he.attrs["Description"] = "0 = no histogram equalization applied to image; 1 = histogram equalization applied to image"
-
-        br = f.create_dataset("ProcessingInfo/BackgroundRemoval", data=backremove)
-        br.attrs["Description"] = "0 = background has not been subtracted from image; 1 = background has been subtracted from image"
-
-        vr = f.create_dataset("ProcessingInfo/VanRhijnCorrection", data=vanrhijn)
-        vr.attrs["Description"] = "0 = Van Rhijn effect has not be removed from the image; 1 = Van Rhijn effect has been removed from the image"
-
-        ef = f.create_dataset("ProcessingInfo/ExtinctionFactor", data=extinction)
-        ef.attrs["Description"] = "0 = extinction factor atmospheric correction has not been applied to the image; 1 = extinction factor atmospheric correction has been applied to the image"
 
 
-def worker(filename):
-    """Parallel processing handleer for a single image"""
-
-    # pylint: disable=global-variable-undefined
-
-    processor = ImageProcessor(main_config)
-    processor.run(filename)
-
-    return processor
-
-
-def worker_init(config):
-    """Initialize parallel processing handler"""
-
-    # pylint: disable=global-variable-undefined
-
-    global main_config
-
-    main_config = config
+#def worker(filename):
+#    """Parallel processing handleer for a single image"""
+#
+#    # pylint: disable=global-variable-undefined
+#
+#    #processor = ImageProcessor(main_config)
+#    processor.run(filename)
+#
+#    return processor
+#
+#
+#def worker_init(config):
+#    """Initialize parallel processing handler"""
+#
+#    # pylint: disable=global-variable-undefined
+#
+#    global main_config
+#
+#    main_config = config
+#
+#    global processor
+#
+#    processor = ImageProcessor(main_config)
 
 
 # -------------------------------------------------------------------------
@@ -510,11 +641,21 @@ def parse_args():
     parser.add_argument(
         "-o",
         "--output",
-        default="mango.hdf5",
-        help="Output filename (default is mango.hdf5)",
+        default="mango-l1.hdf5",
+        help="Output filename (default is mango-l1.hdf5)",
     )
     parser.add_argument(
-        "-n", "--numproc", type=int, default=1, help="Number of parallel processes"
+        "-n", 
+        "--numproc", 
+        type=int, 
+        default=1, 
+        help="Number of parallel processes"
+    )
+    parser.add_argument(
+        "-s", 
+        "--sequential", 
+        action="store_true", 
+        help="Process images sequentially without multiprocessing"
     )
     parser.add_argument(
         "-v",
@@ -550,11 +691,21 @@ def find_config(filename):
         station = h5["image"].attrs["station"]
         instrument = h5["image"].attrs["instrument"]
 
-    name = f"{station}-{instrument}.ini"
+    # Placeholder for default config file location
+    #   This function can be rewritten later
+    config_dir = os.environ['MANGONETWORK_CONFIGS']
 
-    logging.debug("Using package configuration file: %s", name)
+    config_file = os.path.join(config_dir, f"{station}-{instrument}.ini")
 
-    return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    logging.debug("Using package configuration file: %s", config_file)
+
+    #name = f"{station}-{instrument}.ini"
+
+    #logging.debug("Using package configuration file: %s", name)
+
+    #return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    return config_file
+
 
 
 def main():
@@ -580,24 +731,36 @@ def main():
 
     if args.config:
         logging.debug("Alternate configuration file: %s", args.config)
-        if not os.path.exists(args.config):
+        if os.path.exists(args.config):
+            config_file = args.config
+        else:
             logging.error("Config file not found")
             sys.exit(1)
-        with open(args.config, encoding="utf-8") as f:
-            contents = f.read()
     else:
-        contents = find_config(inputs[0])
+        config_file = find_config(inputs[0])
 
     config = configparser.ConfigParser()
-    config.read_string(contents)
+    config.read(config_file)
 
-    with multiprocessing.Pool(
-        processes=args.numproc, initializer=worker_init, initargs=(config,)
-    ) as pool:
-        results = pool.map(worker, inputs, chunksize=1)
+    ## Make whether or not to multiprocess an option
+    #with multiprocessing.Pool(
+    #    processes=args.numproc, initializer=worker_init, initargs=(config,)
+    #) as pool:
+    #    results = pool.map(worker, inputs, chunksize=1)
 
+    #processor = ImageProcessor(config)
+    #for filename in inputs:
+    #    print(filename)
+    #    processor.run(filename)
+
+    processor = ImageProcessor(config)
+    processor.setup(inputs[0])
+    processor.run(inputs, numproc=args.numproc, seq=args.sequential)
     output_file = pathlib.Path(args.output)
-    write_to_hdf5(output_file, config, results)
+    processor.write_to_hdf5(output_file)
+
+    #output_file = pathlib.Path(args.output)
+    #write_to_hdf5(output_file, config, results)
 
     sys.exit(0)
 
