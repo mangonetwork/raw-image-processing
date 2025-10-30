@@ -25,7 +25,6 @@ import os
 import sys
 import platform
 import io
-#import time
 import datetime as dt
 
 import h5py
@@ -60,21 +59,6 @@ class ImageProcessor:
         self.elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
         self.remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 
-        # Results
-
-        #self.image = None
-        #self.metadata = None
-        #self.azimuth = None
-        #self.elevation = None
-        #self.latitude = None
-        #self.longitude = None
-        #self.image_mask = None
-        #self.vanrhijn_factor = None
-        #self.extinction_factor = None
-        #self.new_x_grid = None
-        #self.new_y_grid = None
-        #self.trans_x_grid = None
-        #self.trans_y_grid = None
 
     def setup(self, filename):
         """Setup the processing algorithm by collecting the time independent metadata and calculating the position arrays that will be constant over the entire night"""
@@ -179,7 +163,6 @@ class ImageProcessor:
         C = self.config.getfloat("CALIBRATION_PARAMS", "C")
         D = self.config.getfloat("CALIBRATION_PARAMS", "D")
 
-        #elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
 
         # Create a grid and find the transformed coordinates of each grid point
 
@@ -196,14 +179,6 @@ class ImageProcessor:
         self.new_x_grid, self.new_y_grid = np.meshgrid(
             np.linspace(-d, d, new_i_max), np.linspace(-d, d, new_j_max)
         )
-
-#        plt.scatter(self.trans_x_grid, self.trans_y_grid, s=0.5)
-#        plt.scatter(self.new_x_grid, self.new_y_grid, s=0.5)
-#        plt.axvline(-d, color='magenta')
-#        plt.axvline(d, color='magenta')
-#        plt.axhline(-d, color='magenta')
-#        plt.axhline(d, color='magenta')
-#        plt.show()
 
 
 
@@ -244,8 +219,6 @@ class ImageProcessor:
         site_lat = self.metadata["site_lat"] * np.pi / 180
         site_lon = self.metadata["site_lon"] * np.pi / 180
 
-        #elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-
         psi = np.sqrt(self.new_x_grid**2 + self.new_y_grid**2) / self.REha
 
         # Law of Cosines
@@ -258,7 +231,6 @@ class ImageProcessor:
         self.image_mask = elv < self.elev_cutoff * np.pi / 180.0
         self.zero_mask = elv < 0.
 
-        # This should all be in a higher-level data product - altitude dependent
         # Use Haversine equations to find lat/lon of each point
 
         lat = np.arcsin(
@@ -276,53 +248,10 @@ class ImageProcessor:
         self.latitude = lat * 180.0 / np.pi
         self.longitude = lon * 180.0 / np.pi
 
-#        plt.scatter(self.trans_x_grid, self.trans_y_grid, s=0.5, c='k')
-#        c = plt.scatter(self.new_x_grid, self.new_y_grid, s=0.5, c=self.elevation, cmap='bwr', vmin=0., vmax=30.)
-#        plt.colorbar(c)
-#        plt.show()
 
     def estimate_background(self, image):
 
-        #image = np.array(image, dtype=float)
-        #image[image>10000.] = np.nan
-        tstmp = dt.datetime.utcfromtimestamp(image.attrs['start_time'])
-    
-        # Offset from edge of image and size of region for determining the background in each corner of image
-        offx = int(0.015*image.shape[1])
-        sizex = int(0.05*image.shape[1])
-        offy = int(0.015*image.shape[0])
-        sizey = int(0.05*image.shape[0])
-
-
-        #print('NUMBER PIXELS', sizex*sizey)
-
-        # CCD correction - rename "background"
-        # Look up "missing value" for hdf5
-
-    
-        # Calculate means in the four corners
-        #m1 = image[offy:offy+sizey, offx:offx+sizex].nanmean()
-        #m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].nanmean()
-        #m3 = image[offy:offy+sizey, -(offx+sizex):-offx].nanmean()
-        #m4 = image[-(offy+sizey):-offy, offx:offx+sizex].nanmean()
-        m1 = np.nanmean(image[offy:offy+sizey, offx:offx+sizex])
-        m2 = np.nanmean(image[-(offy+sizey):-offy, -(offx+sizex):-offx])
-        m3 = np.nanmean(image[offy:offy+sizey, -(offx+sizex):-offx])
-        m4 = np.nanmean(image[-(offy+sizey):-offy, offx:offx+sizex])
-        m = np.mean([m1,m2,m3,m4])
-
-
-        #fig, ax = plt.subplots()
-        #ax.imshow(image)
-        #ax.axvline(offx)
-        #ax.axvline(offx+sizex)
-        #ax.axhline(offy)
-        #ax.axhline(offy+sizey)
-        #plt.show()
-
-
-
-        # May be able to make a better estimate from the mask at the el=0 level 
+        # Estimate background wiht edges or image
         x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
         y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
         rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
@@ -330,85 +259,16 @@ class ImageProcessor:
         mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
 
         masked_image = image[mask]
-
-        fig, ax = plt.subplots(figsize=(8,6))
-        x = np.arange(200, 600, 2)
-        ct, bn, _ = ax.hist(masked_image, bins=x, density=True, color='lightgrey', zorder=1)
-
-        #print('EVEN:', len(image[image.astype(int)%2==0]))
-        #print('ODD:', len(image[image.astype(int)%2==1]))
-        #print('RATIO:', len(image[image.astype(int)%2==1])/len(image[image.astype(int)%2==0]))
-        #inttot = np.sum(np.diff(bn)*ct)
-
-#        ax2 = ax.twinx()
-#        ax2.hist(image[offy:offy+sizey, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
-#        ax2.hist(image[-(offy+sizey):-offy, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
-#        ax2.hist(image[offy:offy+sizey, -(offx+sizex):-offx].flatten(), bins=bins, histtype='step', linewidth=2)
-#        ax2.hist(image[-(offy+sizey):-offy, offx:offx+sizex].flatten(), bins=bins, histtype='step', linewidth=2)
-
-
-        mu0 = np.nanmean(masked_image)
-        sig0 = np.nanstd(masked_image)
-        med0 = np.nanmedian(masked_image)
-        label = 'ALL\n'rf'$\mu$ = {mu0:.2f}''\n'rf'$\sigma$ = {sig0:.2f}''\n'rf'M = {med0:.1f}'
-        ax.text(0.8, 0.8, label, transform=ax.transAxes)
-
-        mu = np.nanmean(masked_image[masked_image<30000])
-        sig = np.nanstd(masked_image[masked_image<30000])
-        med = np.nanmedian(masked_image[masked_image<30000])
-        label = '<30000\n'rf'$\mu$ = {mu:.2f}''\n'rf'$\sigma$ = {sig:.2f}''\n'rf'M = {med:.1f}'
-        ax.text(0.8, 0.6, label, transform=ax.transAxes)
-
-        mu = np.nanmean(masked_image[masked_image<1000])
-        sig = np.nanstd(masked_image[masked_image<1000])
-        med = np.nanmedian(masked_image[masked_image<1000])
-        label = '<1000\n'rf'$\mu$ = {mu:.2f}''\n'rf'$\sigma$ = {sig:.2f}''\n'rf'M = {med:.1f}'
-        ax.text(0.8, 0.4, label, transform=ax.transAxes)
-
-        ax.axvline(med0, color='royalblue', label='median')
-        ax.axvline(mu, color='orange', linestyle='--', label='mean (<1000)')
-        ax.axvline(mu0, color='k', linestyle=':', label='mean')
-        #ax.axvline(np.nanmean(image[mask]), color='grey')
-
-        #x = np.arange(200, 600, 1)
-        from scipy.stats import norm, poisson
-        #r = sig-mu
-        #print(r)
-        rv = poisson(mu)
-        ax.plot(x, rv.pmf(x), color='hotpink', label='Poisson')
-        #rv = poisson_binom(mu)
-        #ax.plot(x, rv.pmf(x), color='lightgreen')
-        rv = norm(loc=mu, scale=sig)
-        ax.plot(x, rv.pdf(x), color='limegreen', label='Normal')
-
-        ax.set_xlabel('Pixel Brightness')
-        ax.set_ylabel('Count Density')
-        station = self.metadata['station']
-        instrument = self.metadata['instrument']
-        ax.set_title(f'{station.upper()} {instrument} {tstmp.isoformat()}')
-
-        ax.legend()
-
-        plt.savefig(f'background_histograms/background_histogram_{station}_{instrument}_{tstmp:%Y%m%d_%H%M%S}.png')
-        #plt.show()
-        plt.close()
+        m = np.nanmean(masked_image)
 
         return m
 
 
 
-    #def process(self, raw_image):
     def regrid_image(self, raw_image):
         """Processing algorithm"""
 
-        #elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-
         cooked_image = np.array(raw_image)
-
-        # WHAT REALLY NEEDS TO BE MULTIPROCESSED?
-        #background = self.estimate_background(cooked_image) # THIS
-
-        # COLLECTING TIME-DEPENDENT METADATA
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
@@ -416,7 +276,7 @@ class ImageProcessor:
             (self.new_x_grid, self.new_y_grid),
             fill_value=0,
             method='linear'
-        )   # THIS
+        )
 
 #        fig = plt.figure()
 #        ax = fig.add_subplot(121)
@@ -438,26 +298,37 @@ class ImageProcessor:
     
         site_name = self.config.get("SITE_INFO", "SITE_NAME")
         bright_alt = self.config.getfloat("PROCESSING", "ALTITUDE")
-        elevcutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-    
-        #start_time = [rec.metadata["start_time"] for rec in results]
-        #end_time = [rec.metadata["end_time"] for rec in results]
-        #ccd_temp = [rec.metadata["ccd_temp"] for rec in results]
-        #background = [rec.background for rec in results]
-    
-        #rec = results[0]
     
         output_file.parent.mkdir(parents=True, exist_ok=True)
     
         with h5py.File(output_file, "w") as f:
-            f.create_group("SiteInfo")
-            f.create_group("ProcessingInfo")
-            f.create_group("Coordinates")
-            f.create_group("DataQuality")
+
+            # Image Data
+            images = f.create_dataset(
+                "ImageData",
+                data=self.image_data.astype('uint16'),
+                compression="gzip",
+                compression_opts=1,
+            )
+            images.attrs["Description"] = "pixel values for images"
+            images.attrs["Size"] = "Nrecords x Ipixels x Jpixels"
+            images.attrs["station"] = self.metadata["station"]
+            images.attrs["instrument"] = self.metadata["instrument"]
+            images.attrs["remove_background"] = self.remove_background
     
+            mask = f.create_dataset(
+                "Mask", data=self.image_mask, compression="gzip", compression_opts=1
+            )
+            mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
+            mask.attrs["Size"] = "Ipixels x Jpixels"
+    
+            back = f.create_dataset("Background", data=self.background)
+            back.attrs["Description"] = "Background brightness estimation from corners"
+            back.attrs["Size"] = "Nrecords"
+ 
+            # Time
             t = f.create_dataset(
                 "UnixTime",
-                #data=np.array([start_time, end_time]),
                 data=self.time,
                 compression="gzip",
                 compression_opts=1,
@@ -465,7 +336,10 @@ class ImageProcessor:
             t.attrs["Description"] = "unix time stamp"
             t.attrs["Size"] = "Nrecords"
             t.attrs["Unit"] = "seconds"
-    
+            
+            # Coordinates
+            f.create_group("Coordinates")
+
             lat = f.create_dataset(
                 "Coordinates/Latitude", data=self.latitude, compression="gzip", compression_opts=1
             )
@@ -502,36 +376,14 @@ class ImageProcessor:
                 compression="gzip",
                 compression_opts=1,
             )
-            pc.attrs[
-                "Description"
-            ] = "coordinates of each pixel in grid at the airglow altitude"
+            pc.attrs["Description"] = "coordinates of each pixel in grid at the airglow altitude"
             pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
             pc.attrs["Projection Altitude"] = bright_alt
             pc.attrs["Unit"] = "km"
     
-            images = f.create_dataset(
-                "ImageData",
-                #data=np.array([rec.image for rec in results]),
-                data=self.image_data.astype('uint16'),
-                compression="gzip",
-                compression_opts=1,
-            )
-            images.attrs["Description"] = "pixel values for images"
-            images.attrs["Size"] = "Nrecords x Ipixels x Jpixels"
-            images.attrs["station"] = self.metadata["station"]
-            images.attrs["instrument"] = self.metadata["instrument"]
-            images.attrs["remove_background"] = self.remove_background
-    
-            mask = f.create_dataset(
-                "Mask", data=self.image_mask, compression="gzip", compression_opts=1
-            )
-            mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
-            mask.attrs["Size"] = "Ipixels x Jpixels"
-    
-            back = f.create_dataset("Background", data=self.background)
-            back.attrs["Description"] = "Background brightness estimation from corners"
-            back.attrs["Size"] = "Nrecords"
-    
+            # Site Info
+            f.create_group("SiteInfo")
+
             name = f.create_dataset("SiteInfo/Name", data=site_name)
             name.attrs["Description"] = "site name"
     
@@ -548,12 +400,18 @@ class ImageProcessor:
             coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
             coord.attrs["Unit"] = "degrees"
     
+            # Data Quality
+            f.create_group("DataQuality")
+
             ccd = f.create_dataset("DataQuality/CCDTemperature", data=self.ccd_temp)
             ccd.attrs["Description"] = "Temperature of CCD"
             ccd.attrs["Size"] = "Nrecords"
             ccd.attrs["Unit"] = "degrees C"
 
-            ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=elevcutoff)
+            # Processing Info
+            f.create_group("ProcessingInfo")
+
+            ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=self.elev_cutoff)
             ec.attrs["Description"] = "elevation angle cutoff [deg]"
     
             ha = f.create_dataset("ProcessingInfo/Altitude", data=bright_alt)
@@ -578,45 +436,13 @@ class ImageProcessor:
             cfg = f.create_dataset("ProcessingInfo/ConfigFile", data=config_str)
             cfg.attrs["Description"] = "full text of config file"
 
+            # Platform Info
             f.create_group("ProcessingInfo/PlatformInfo")
             f.create_dataset("ProcessingInfo/PlatformInfo/MachineType", data=platform.machine())
             f.create_dataset("ProcessingInfo/PlatformInfo/System", data=platform.system())
             f.create_dataset("ProcessingInfo/PlatformInfo/Release", data=platform.release())
             f.create_dataset("ProcessingInfo/PlatformInfo/Version", data=platform.version())
             f.create_dataset("ProcessingInfo/PlatformInfo/HostName", data=platform.node())
-
-# -------------------------------------------------------------------------
-# Application methods
-# -------------------------------------------------------------------------
-
-# pylint: disable=too-many-statements, too-many-locals
-
-
-
-
-#def worker(filename):
-#    """Parallel processing handleer for a single image"""
-#
-#    # pylint: disable=global-variable-undefined
-#
-#    #processor = ImageProcessor(main_config)
-#    processor.run(filename)
-#
-#    return processor
-#
-#
-#def worker_init(config):
-#    """Initialize parallel processing handler"""
-#
-#    # pylint: disable=global-variable-undefined
-#
-#    global main_config
-#
-#    main_config = config
-#
-#    global processor
-#
-#    processor = ImageProcessor(main_config)
 
 
 # -------------------------------------------------------------------------
@@ -742,25 +568,12 @@ def main():
     config = configparser.ConfigParser()
     config.read(config_file)
 
-    ## Make whether or not to multiprocess an option
-    #with multiprocessing.Pool(
-    #    processes=args.numproc, initializer=worker_init, initargs=(config,)
-    #) as pool:
-    #    results = pool.map(worker, inputs, chunksize=1)
-
-    #processor = ImageProcessor(config)
-    #for filename in inputs:
-    #    print(filename)
-    #    processor.run(filename)
-
+    # Process images
     processor = ImageProcessor(config)
     processor.setup(inputs[0])
     processor.run(inputs, numproc=args.numproc, seq=args.sequential)
     output_file = pathlib.Path(args.output)
     processor.write_to_hdf5(output_file)
-
-    #output_file = pathlib.Path(args.output)
-    #write_to_hdf5(output_file, config, results)
 
     sys.exit(0)
 
