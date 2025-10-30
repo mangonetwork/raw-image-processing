@@ -2,75 +2,60 @@
 This repository contains the scripts needed for low-level MANGO data processing.
 
 ## Installation
-This package is organized to the PEP 517/518 standards and can be installed with the latest version of pip.  To install for development:
-
-1. Clone repository
-2. Enter top directory
-3. `pip install -e .`
+This package is organized to the PEP 517/518 standards and can be installed with the latest version of pip.  
+```
+pip install git+https://github.com/mangonetwork/raw-image-processing.git
+```
+To install for development, clone then pip install with the `-e` flag.
+```
+git clone https://github.com/mangonetwork/raw-image-processing.git
+cd raw-image-processing
+pip install -e .
+```
 
 ## Usage
-This package provides access to a number of command line programs for process raw MANGO data and generating standard data products:
-
-- mango-process-raw-images
-- mango-calibrate
-- mango-starcal
-- mango-quicklook-movies
-- mango-keograms
-
-Usage of each of these programs is described below.
-
-### mango-starcal
-Validates a starcal file by overplotting the selected star points on the image.  This is provided mostly as a convenience and as a placeholder for future more sophisticated processes that could generate starcal files automatically.  The process requires the three-character station code and instrument (redline or greenline) as input.  NOTE: This process will likely not work on computers other than the one that was originally used to create the starcal file.
-
-```
-$ mango-starcal <station> <instrument> -sc <starcal file name>
-```
-
-### mango-calibrate
-This adds the calibration parameter section to the provided config file using a specified a starcal file.  If a config file (`-c`) or a starcal file (`-sc`) are not provided, the default from the package data are used.  This program should only need to be run once for each camera.
-
-```
-$ mango-calibrate <station> <instrument> -c <config file name> -sc <starcal file name>
-```
+This package provides command line programs for generating quicklook moves and processing raw images into level 1 data files (usually done nightly).  Both these programs require a configuration file that specifies metadata and some processing parameters.  The processing code requires the configuration file contain the `CALIBRATON_PARAMS` section, which is generated with the [image-calibration](https://github.com/mangonetwork/image-calibration) module.
 
 ### mango-process-raw-images
-This produces a single processed data file from the provided raw image files where the output data are calibrated, equalized, rotated, and unwarpped.  It requires a configuration file which lists the calibration parameters (created by `mango-calibrate`), metadata, and several other parameters specifying how the images are to be processed.  If a config file is not provide (`-c`), the default from the package data is used. This process also requires a file containing a list of input raw files (`-f`), and the name of the output file (`-o`).
+This produces a single processed data file from the provided raw image files where the output data are rotated and unwarpped.  
+```
+mango-process-raw-images <list of input raw files>
+```
+This program can take a long time to run.  Use the `-n` flag followed by an integer to customize the number of parallel processes that are run. Conversely, the `-s` flag will force the program to process images sequentially without using the multiprocessing module.  This can be useful for some debugging operations.
 
-```
-$ mango-process-raw-images -c <config file name> -i <list of input raw files> -o <output file name>
-```
 
 ### mango-quicklook-movies
-This produces a quicklook movie from provided raw image files.  The movie will be rotated and equalized, but not unwarpped.  It requires a configuration file which specifies at minimum a rotation angle (`manual_theta`).  If the configuration file has been calibrated, it will instead use the calibrated rotation angle.  If a config file is not provide (`-c`), the default from the package data is used. This process also requires a file containing a list of input raw files (`-f`), and the name of the output movie file (`-o`).
-
+This produces a quicklook movie from provided raw image files.  The movie will be rotated and equalized, but not unwarpped.  It requires a configuration file which specifies at minimum a rotation angle (`manual_theta`).  If the configuration file has been calibrated, it will instead use the calibrated rotation angle.  
 ```
-$ mango-quicklook-movies -c <config file name> -i <list of input raw files> -o <output file name>
+mango-quicklook-movies <list of input raw files>
 ```
 
-### mango-keograms
-Placeholder for future keogram program.
 
-## Configuration Files
 
-This package utilizes two types of configuration files: config and starcal. Default configuration files are included as part of the package data under `/raw-image-processing/src/mangonetwork/raw/data`.
+Both programs have the options of using the following additional flags.
 
-### starcal
-The starcal files contain lists of stars and their coordinates in an image that can be used to calculate the calibration parameters by `mango-calibrate`.  The header of each file should include the full filename of the raw image used to identify star positions.  Columns in the file include the star name, real azimuth, real elevation, x position in image, and y position in image.  Presently, these files are created manually.  The `mango-starcal` program is helpful to create these files, but an "empty" file must first be created that specifies the raw image filename header
+`-f` Instead of listing input files as command line arguments, they can be listed in a text file and that text file can be provided as input.  To generate a list of hdf5 files in a particular directory in the text file `filelist`:
+```
+ls path/to/data/directory > filelist
+```
+To generate a list of files for a single night if your directory strucure mimics that used in the MANGO database:
+```
+ls /path/to/local/mango/archive/<site>/<instrument>/raw/<year>/<doy>/??/*.hdf5 > filelist
+```
 
-### config
-The config file contains all information needed to run `mango-process-raw-images` and `mango-quicklook-movies`.  The `CALIBRATION_PARAMS` section is filled automatically by `mango-calibrate`.  The `PROCESSING` section contains site metadata and specific parameters needed to process images. The `QUICKLOOK` section contains a rotation angle entered manually so quicklook movies can be created before the camera is calibrated.
+`-c` Specify the config file to use rather than the default.
+
+`-o` Specify the name of the output file instead of using the default.
+
 
 ## Collecting Data
 This package operates on data posted in the [MANGO Database](https://data.mangonetwork.org/data/transport/mango/archive/).  Individual data files can be browsed and downloaded in a browser, but it may be useful to bulk download the days you're interested in with [wget](https://www.gnu.org/software/wget/).
 
 Download a singe day's worth of data mimicing the directory structure of the online database:
 ```
-wget -r -np -nH --cut-dir 8 -R "index.html*" -R "*.png" https://data.mangonetwork.org/data/transport/mango/archive/<site>/<instrument>/raw/<year>/<doy>/
+wget -r -np -nH --cut-dir 8 -R "index.html*" https://data.mangonetwork.org/data/transport/mango/archive/<site>/<instrument>/raw/<year>/<doy>/
 ```
-
-To only download hdf5 files, add the `-R "*.png"` flag.  To only download png files, add the `-R "*.hdf5"` flag.
-
-To generate a filelist text file, run the following:
+To only download hdf5 files, add the `-R "*.png"` flag.  To only download png files, add the `-R "*.hdf5"` flag.  To download to a specific local location, use the `-P` flag.
 ```
-ls /path/to/local/mango/archive/<site>/<instrument>/raw/<year>/<doy>/??/*.hdf5
+wget -r -np -nH --cut-dir 4 -R "index.html*" -P /path/to/local/archive https://data.mangonetwork.org/data/transport/mango/archive/<site>/<instrument>/raw/<year>/<doy>/
 ```
