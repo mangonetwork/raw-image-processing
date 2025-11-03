@@ -30,8 +30,7 @@ This produces a quicklook movie from provided raw image files.  The movie will b
 mango-quicklook-movies <list of input raw files>
 ```
 
-
-
+### Additional Options
 Both programs have the options of using the following additional flags.
 
 `-f` Instead of listing input files as command line arguments, they can be listed in a text file and that text file can be provided as input.  To generate a list of hdf5 files in a particular directory in the text file `filelist`:
