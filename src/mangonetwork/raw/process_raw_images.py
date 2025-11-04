@@ -33,6 +33,9 @@ from scipy.interpolate import griddata
 
 
 import matplotlib.pyplot as plt
+# skyfield stuff needed for moon flags
+from skyfield import almanac
+from skyfield.api import N, S, E, W, load, wgs84
 
 if sys.version_info < (3, 9):
     import importlib_resources as resources
@@ -84,7 +87,8 @@ class ImageProcessor:
 
         background = self.estimate_background(raw_image)
 
-        moon_pos = self.moon_position(metadata["start_time"])
+        time = (metadata["start_time"] + metadata["end_time"])/2.
+        moon_pos = self.moon_position(time)
 
         image = self.regrid_image(raw_image)
 
@@ -115,6 +119,8 @@ class ImageProcessor:
         self.ccd_temp = np.array([md["ccd_temp"] for md in metadata])
         self.metadata["filelist"] = [md["filename"] for md in metadata]
 
+        self.quality_flags()
+
         logging.debug("Processing finished")
 
     def get_metadata(self, image):
@@ -142,6 +148,33 @@ class ImageProcessor:
         metadata["ccd_temp"] = image.attrs["ccd_temp"]
 
         return metadata
+
+    def moon_position(self, time):
+        """Calculate the Moon phase and position"""
+
+        ## Calculate moon phase and elevation
+        #start_time = self.metadata["start_time"]
+        #end_time = self.metadata["end_time"]
+        #time = (start_time + end_time)/2.
+
+        site_lat = self.metadata["site_lat"]
+        site_lon = self.metadata["site_lon"]
+
+        eph = load('de421.bsp')
+        ts = load.timescale()
+
+        t = ts.utc(1970, 1, 1, 0, 0, time)
+        print(t.utc_datetime())
+        phase = almanac.moon_phase(eph, t)
+        print("Moon Phase:", phase.degrees)
+
+        earth = eph["earth"]
+        site = earth + wgs84.latlon(site_lat, site_lon)
+        moon = eph["moon"]
+        elev, azmt, dist = site.at(t).observe(moon).apparent().altaz()
+        print("Moon Elevation:", elevation.degrees)
+
+        return phase, azmt, elev
 
 
     def create_transform_grids(self, image):
