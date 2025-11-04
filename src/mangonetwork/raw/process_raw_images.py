@@ -84,6 +84,8 @@ class ImageProcessor:
 
         background = self.estimate_background(raw_image)
 
+        moon_pos = self.moon_position(metadata["start_time"])
+
         image = self.regrid_image(raw_image)
 
         if self.remove_background:
@@ -251,14 +253,14 @@ class ImageProcessor:
 
     def estimate_background(self, image):
 
-        # Estimate background wiht edges or image
-        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
-        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+        ## Estimate background wiht edges or image
+        #x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+        #y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+        #rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+        #xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
+        #mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
 
-        masked_image = image[mask]
+        masked_image = image[self.zero_mask]
         m = np.nanmean(masked_image)
 
         return m
