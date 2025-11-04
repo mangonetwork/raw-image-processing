@@ -87,15 +87,12 @@ class ImageProcessor:
 
         background = self.estimate_background(raw_image)
 
-        time = (metadata["start_time"] + metadata["end_time"])/2.
-        moon_pos = self.moon_position(time)
-
         image = self.regrid_image(raw_image)
 
         if self.remove_background:
             image = image - background
 
-        return image, background, metadata
+        return image, metadata, background
 
     def run(self, filelist, numproc=2, seq=False):
         """Run processing on all input files"""
@@ -113,13 +110,14 @@ class ImageProcessor:
                 results = pool.map(self.process, filelist, chunksize=1)
 
         self.image_data = np.array([r[0] for r in results])
-        self.background = np.array([r[1] for r in results])
-        metadata = [r[2] for r in results]
+        self.background = np.array([r[2] for r in results])
+        metadata = [r[1] for r in results]
         self.time = np.array([[md["start_time"], md["end_time"]] for md in metadata])
         self.ccd_temp = np.array([md["ccd_temp"] for md in metadata])
         self.metadata["filelist"] = [md["filename"] for md in metadata]
 
-        self.quality_flags()
+        ut = np.mean(self.time, axis=1)
+        self.moon_phase, self.moon_az, self.moon_el = self.moon_position(ut)
 
         logging.debug("Processing finished")
 
@@ -152,29 +150,23 @@ class ImageProcessor:
     def moon_position(self, time):
         """Calculate the Moon phase and position"""
 
-        ## Calculate moon phase and elevation
-        #start_time = self.metadata["start_time"]
-        #end_time = self.metadata["end_time"]
-        #time = (start_time + end_time)/2.
-
         site_lat = self.metadata["site_lat"]
         site_lon = self.metadata["site_lon"]
 
         eph = load('de421.bsp')
         ts = load.timescale()
-
         t = ts.utc(1970, 1, 1, 0, 0, time)
-        print(t.utc_datetime())
-        phase = almanac.moon_phase(eph, t)
-        print("Moon Phase:", phase.degrees)
 
+        # Find phase
+        phase = almanac.moon_phase(eph, t)
+
+        # Find azimuth and elevation for every time
         earth = eph["earth"]
         site = earth + wgs84.latlon(site_lat, site_lon)
         moon = eph["moon"]
         elev, azmt, dist = site.at(t).observe(moon).apparent().altaz()
-        print("Moon Elevation:", elevation.degrees)
 
-        return phase, azmt, elev
+        return phase.degrees, azmt.degrees, elev.degrees
 
 
     def create_transform_grids(self, image):
@@ -264,7 +256,7 @@ class ImageProcessor:
         elv = np.pi / 2.0 - np.arccos(b / c) - psi
         azm = np.arctan2(self.new_x_grid, self.new_y_grid)
         self.image_mask = elv < self.elev_cutoff * np.pi / 180.0
-        self.zero_mask = elv < 0.
+        #self.zero_mask = elv < 0.
 
         # Use Haversine equations to find lat/lon of each point
 
@@ -286,14 +278,14 @@ class ImageProcessor:
 
     def estimate_background(self, image):
 
-        ## Estimate background wiht edges or image
-        #x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-        #y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-        #rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-        #xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
-        #mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+        # Estimate background with edges or image
+        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
+        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
 
-        masked_image = image[self.zero_mask]
+        masked_image = image[mask]
         m = np.nanmean(masked_image)
 
         return m
@@ -442,6 +434,21 @@ class ImageProcessor:
             ccd.attrs["Description"] = "Temperature of CCD"
             ccd.attrs["Size"] = "Nrecords"
             ccd.attrs["Unit"] = "degrees C"
+
+            phase = f.create_dataset("DataQuality/MoonPhase", data=self.moon_phase)
+            phase.attrs["Description"] = "Moon Phase in degrees; New = 0, First Quarter = 90, Full = 180, Last Quarter = 270"
+            phase.attrs["Size"] = "Nrecords"
+            phase.attrs["Unit"] = "degrees"
+
+            az = f.create_dataset("DataQuality/MoonAzimuth", data=self.moon_az)
+            az.attrs["Description"] = "Azimuth of Moon position"
+            az.attrs["Size"] = "Nrecords"
+            az.attrs["Unit"] = "degrees"
+
+            el = f.create_dataset("DataQuality/MoonElevation", data=self.moon_el)
+            el.attrs["Description"] = "Elevation of Moon position"
+            el.attrs["Size"] = "Nrecords"
+            el.attrs["Unit"] = "degrees"
 
             # Processing Info
             f.create_group("ProcessingInfo")
