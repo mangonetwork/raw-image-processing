@@ -327,6 +327,9 @@ class ImageProcessor:
         bright_alt = self.config.getfloat("PROCESSING", "ALTITUDE")
     
         output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Apply mask before saving output image
+        self.image_data[:,self.image_mask] = 0.
     
         with h5py.File(output_file, "w") as f:
 
@@ -344,7 +347,10 @@ class ImageProcessor:
             images.attrs["remove_background"] = self.remove_background
     
             mask = f.create_dataset(
-                "Mask", data=self.image_mask, compression="gzip", compression_opts=1
+                "Mask", 
+                data=self.image_mask, 
+                compression="gzip", 
+                compression_opts=1,
             )
             mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
             mask.attrs["Size"] = "Ipixels x Jpixels"
@@ -368,7 +374,10 @@ class ImageProcessor:
             f.create_group("Coordinates")
 
             lat = f.create_dataset(
-                "Coordinates/Latitude", data=self.latitude, compression="gzip", compression_opts=1
+                "Coordinates/Latitude", 
+                data=self.latitude.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
             )
             lat.attrs["Description"] = "geodetic latitude of each pixel"
             lat.attrs["Size"] = "Ipixels x Jpixels"
@@ -376,7 +385,10 @@ class ImageProcessor:
             lat.attrs["Unit"] = "degrees"
     
             lon = f.create_dataset(
-                "Coordinates/Longitude", data=self.longitude, compression="gzip", compression_opts=1
+                "Coordinates/Longitude", 
+                data=self.longitude.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
             )
             lon.attrs["Description"] = "geodetic longitude of each pixel"
             lon.attrs["Size"] = "Ipixels x Jpixels"
@@ -384,14 +396,20 @@ class ImageProcessor:
             lon.attrs["Unit"] = "degrees"
     
             az = f.create_dataset(
-                "Coordinates/Azimuth", data=self.azimuth, compression="gzip", compression_opts=1
+                "Coordinates/Azimuth", 
+                data=self.azimuth.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
             )
             az.attrs["Description"] = "azimuth of each pixel"
             az.attrs["Size"] = "Ipixels x Jpixels"
             az.attrs["Unit"] = "degrees"
     
             el = f.create_dataset(
-                "Coordinates/Elevation", data=self.elevation, compression="gzip", compression_opts=1
+                "Coordinates/Elevation", 
+                data=self.elevation.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
             )
             el.attrs["Description"] = "elevation of each pixel"
             el.attrs["Size"] = "Ipixels x Jpixels"
@@ -399,7 +417,7 @@ class ImageProcessor:
     
             pc = f.create_dataset(
                 "Coordinates/PixelCoordinates",
-                data=np.array([self.new_x_grid, self.new_y_grid]),
+                data=np.array([self.new_x_grid, self.new_y_grid]).astype('float32'),
                 compression="gzip",
                 compression_opts=1,
             )
