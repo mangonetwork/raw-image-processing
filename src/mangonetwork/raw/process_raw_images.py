@@ -62,6 +62,16 @@ class ImageProcessor:
         self.elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
         self.remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 
+        self.x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+        self.y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+        self.rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+        self.theta = self.config.getfloat("CALIBRATION_PARAMS", "THETA")
+
+        self.A = self.config.getfloat("CALIBRATION_PARAMS", "A")
+        self.B = self.config.getfloat("CALIBRATION_PARAMS", "B")
+        self.C = self.config.getfloat("CALIBRATION_PARAMS", "C")
+        self.D = self.config.getfloat("CALIBRATION_PARAMS", "D")
+
 
     def setup(self, filename):
         """Setup the processing algorithm by collecting the time independent metadata and calculating the position arrays that will be constant over the entire night"""
@@ -76,6 +86,9 @@ class ImageProcessor:
 
         self.create_transform_grids(raw_image)
         self.create_position_arrays()
+
+        self.image_mask = self.create_mask(raw_image)
+
 
     def process(self, filename):
         """Process individual images and extract time-dependent data"""
@@ -92,7 +105,10 @@ class ImageProcessor:
         if self.remove_background:
             image = image - background
 
+        image[self.elevation<self.elev_cutoff] = 0.
+
         return image, metadata, background
+
 
     def run(self, filelist, numproc=2, seq=False):
         """Run processing on all input files"""
@@ -121,6 +137,7 @@ class ImageProcessor:
 
         logging.debug("Processing finished")
 
+
     def get_metadata(self, image):
         """Extract metadata"""
 
@@ -132,6 +149,7 @@ class ImageProcessor:
         metadata["site_lon"] = image.attrs["longitude"]
 
         return metadata
+
 
     def get_time_metadata(self, image):
         """Extract time-dependent metadata"""
@@ -146,6 +164,7 @@ class ImageProcessor:
         metadata["ccd_temp"] = image.attrs["ccd_temp"]
 
         return metadata
+
 
     def moon_position(self, time):
         """Calculate the Moon phase and position"""
@@ -180,23 +199,12 @@ class ImageProcessor:
         new_i_max = self.config.getint("PROCESSING", "NEWIMAX")
         new_j_max = self.config.getint("PROCESSING", "NEWJMAX")
 
-        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-        theta = self.config.getfloat("CALIBRATION_PARAMS", "THETA")
-
-        A = self.config.getfloat("CALIBRATION_PARAMS", "A")
-        B = self.config.getfloat("CALIBRATION_PARAMS", "B")
-        C = self.config.getfloat("CALIBRATION_PARAMS", "C")
-        D = self.config.getfloat("CALIBRATION_PARAMS", "D")
-
-
         # Create a grid and find the transformed coordinates of each grid point
 
         x_grid, y_grid = np.meshgrid(np.arange(i_max), np.arange(j_max))
 
         self.trans_x_grid, self.trans_y_grid = self.transform(
-            x_grid, y_grid, x0, y0, rl, theta, A, B, C, D
+            x_grid, y_grid, self.x0, self.y0, self.rl, self.theta, self.A, self.B, self.C, self.D
         )
 
         # Find unwarped distance to elevation cutoff and create new grid
@@ -207,9 +215,8 @@ class ImageProcessor:
             np.linspace(-d, d, new_i_max), np.linspace(-d, d, new_j_max)
         )
 
-
-
     # pylint: disable=too-many-arguments, too-many-locals
+
 
     def transform(self, x, y, x0, y0, rl, theta, A, B, C, D):
         """Coordinate transform"""
@@ -231,6 +238,7 @@ class ImageProcessor:
 
         return x3, y3
 
+
     def unwarp(self, lam):
         """Convert elevation angle to unwarped distance"""
 
@@ -239,6 +247,7 @@ class ImageProcessor:
         d = self.REha * psi
 
         return d
+
 
     def create_position_arrays(self):
         """Create position arrays"""
@@ -255,8 +264,6 @@ class ImageProcessor:
 
         elv = np.pi / 2.0 - np.arccos(b / c) - psi
         azm = np.arctan2(self.new_x_grid, self.new_y_grid)
-        self.image_mask = elv < self.elev_cutoff * np.pi / 180.0
-        #self.zero_mask = elv < 0.
 
         # Use Haversine equations to find lat/lon of each point
 
@@ -276,16 +283,60 @@ class ImageProcessor:
         self.longitude = lon * 180.0 / np.pi
 
 
-    def estimate_background(self, image):
+    def create_mask(self, image):
+        """Create mask array"""
 
-        # Estimate background with edges or image
-        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-        xgrid, ygrid = np.meshgrid(np.arange(image.shape[1]), np.arange(image.shape[0]))
-        mask = np.sqrt((xgrid-x0)**2 + (ygrid-y0)**2) > rl
+        # Mask low elevation angles
+        elev_mask = self.elevation < self.elev_cutoff
+
+        # Get azimuth and Elevation of new grids
+        elev = np.deg2rad(self.elevation)
+        azmt = np.deg2rad(self.azimuth)
+
+        # Calculate r by finding the roots of the cubic lens function
+        Delta0 = self.C**2 - 3 * self.D * self.B
+        Delta1 = 2 * self.C**3 - 9 * self.D * self.C * self.B + 27 * self.D**2 * (self.A-elev)
+        Gamma = ((Delta1 + np.sqrt(Delta1**2 - 4 * Delta0**3)) / 2)**(1./3.)
+        r = -(self.C + Gamma + Delta0/Gamma)/(3 * self.D)
+
+        # Invert position and rotatation to original ccd coordinates
+        x2 = r*np.sin(azmt)
+        y2 = r*np.cos(azmt)
+
+        t = -np.deg2rad(self.theta)
+        x1 = np.cos(t) * x2 - np.sin(t) * y2
+        y1 = np.sin(t) * x2 + np.cos(t) * y2
+
+        x = x1 * self.rl + self.x0
+        y = y1 * self.rl + self.y0
+
+        # Find location of pixels in new image that are outside the original CCD
+        i_max = image.attrs["width"]
+        j_max = image.attrs["height"]
+
+        x_mask = np.logical_or( x < 0, x > i_max )
+        y_mask = np.logical_or( y < 0, y > j_max )
+        edge_mask = np.logical_or( x_mask, y_mask )
+
+        # Mask where elevation angle is low or pixel outside original CCD
+        mask = np.logical_or(elev_mask, edge_mask)
+
+        return mask
+
+
+
+    def estimate_background(self, image):
+        """Estimate background from dark corners of CCD"""
+
+        i_max = image.attrs["width"]
+        j_max = image.attrs["height"]
+
+        x_grid, y_grid = np.meshgrid(np.arange(i_max), np.arange(j_max))
+
+        mask = np.sqrt((x_grid - self.x0)**2 + (y_grid - self.y0)**2) > self.rl
 
         masked_image = image[mask]
+
         m = np.nanmean(masked_image)
 
         return m
@@ -317,6 +368,7 @@ class ImageProcessor:
 #        ax.scatter(self.new_x_grid, self.new_y_grid, c=new_image, s=0.5)
 #        plt.show()
 
+
         return new_image
 
 
@@ -328,9 +380,6 @@ class ImageProcessor:
     
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Apply mask before saving output image
-        self.image_data[:,self.image_mask] = 0.
-    
         with h5py.File(output_file, "w") as f:
 
             # Image Data
