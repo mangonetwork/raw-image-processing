@@ -30,6 +30,7 @@ import datetime as dt
 import h5py
 import numpy as np
 from scipy.interpolate import griddata
+from apexpy import Apex
 
 
 import matplotlib.pyplot as plt
@@ -46,6 +47,7 @@ else:
 
 RE = 6371.0  # Earth radius (m)
 
+
 # -------------------------------------------------------------------------
 # Image Processor
 # -------------------------------------------------------------------------
@@ -57,8 +59,7 @@ class ImageProcessor:
     def __init__(self, config):
         self.config = config
 
-        ha = self.config.getfloat("PROCESSING", "ALTITUDE")
-        self.REha = RE + ha
+        self.ha = self.config.getfloat("PROCESSING", "ALTITUDE")
         self.elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
         self.remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 
@@ -105,7 +106,7 @@ class ImageProcessor:
         if self.remove_background:
             image = image - background
 
-        image[self.elevation<self.elev_cutoff] = 0.
+        #mage[self.elevation<self.elev_cutoff] = 0.
 
         return image, metadata, background
 
@@ -134,6 +135,13 @@ class ImageProcessor:
 
         ut = np.mean(self.time, axis=1)
         self.moon_phase, self.moon_az, self.moon_el = self.moon_position(ut)
+
+        
+        # Calculate site location in magnetic coordinates
+        datetimes = np.array([dt.datetime.utcfromtimestamp(t) for t in ut])
+        A = Apex(datetimes[0])
+        self.mlat, self.mlon = A.geo2apex(self.metadata["site_lat"], self.metadata["site_lon"], height=self.ha)
+        self.mlt = A.mlon2mlt(self.mlon, datetimes)
 
         logging.debug("Processing finished")
 
@@ -242,9 +250,11 @@ class ImageProcessor:
     def unwarp(self, lam):
         """Convert elevation angle to unwarped distance"""
 
-        b = np.arcsin(RE / self.REha * np.sin(lam + np.pi / 2))  # Law of Sines
+        REha = RE + self.ha
+
+        b = np.arcsin(RE / REha * np.sin(lam + np.pi / 2))  # Law of Sines
         psi = np.pi / 2 - lam - b
-        d = self.REha * psi
+        d = REha * psi
 
         return d
 
@@ -255,12 +265,14 @@ class ImageProcessor:
         site_lat = self.metadata["site_lat"] * np.pi / 180
         site_lon = self.metadata["site_lon"] * np.pi / 180
 
-        psi = np.sqrt(self.new_x_grid**2 + self.new_y_grid**2) / self.REha
+        REha = RE + self.ha
+
+        psi = np.sqrt(self.new_x_grid**2 + self.new_y_grid**2) / REha
 
         # Law of Cosines
 
-        c = np.sqrt(RE**2 + self.REha**2 - 2 * RE * self.REha * np.cos(psi))
-        b = self.REha - RE * np.cos(psi)
+        c = np.sqrt(RE**2 + REha**2 - 2 * RE * REha * np.cos(psi))
+        b = REha - RE * np.cos(psi)
 
         elv = np.pi / 2.0 - np.arccos(b / c) - psi
         azm = np.arctan2(self.new_x_grid, self.new_y_grid)
@@ -376,9 +388,13 @@ class ImageProcessor:
         """Save results to an HDF5 file"""
     
         site_name = self.config.get("SITE_INFO", "SITE_NAME")
-        bright_alt = self.config.getfloat("PROCESSING", "ALTITUDE")
+        mango_team = self.config.get("SITE_INFO", "TEAM")
     
         output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Convert masked image pixels to 0
+        self.image_data[:,self.image_mask] = 0.
+
 
         with h5py.File(output_file, "w") as f:
 
@@ -404,8 +420,8 @@ class ImageProcessor:
             mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
             mask.attrs["Size"] = "Ipixels x Jpixels"
     
-            back = f.create_dataset("Background", data=self.background)
-            back.attrs["Description"] = "Background brightness estimation from corners"
+            back = f.create_dataset("DarkCurrent", data=self.background)
+            back.attrs["Description"] = "contribution of readout and thermal noise to the image brightness; estimated from the unlit corners of the CCD because MANGO imagers are not equipt to take true dark frames (shutter closed) in the field"
             back.attrs["Size"] = "Nrecords"
  
             # Time
@@ -430,7 +446,7 @@ class ImageProcessor:
             )
             lat.attrs["Description"] = "geodetic latitude of each pixel"
             lat.attrs["Size"] = "Ipixels x Jpixels"
-            lat.attrs["Projection Altitude"] = bright_alt
+            lat.attrs["Projection Altitude"] = self.ha
             lat.attrs["Unit"] = "degrees"
     
             lon = f.create_dataset(
@@ -441,7 +457,7 @@ class ImageProcessor:
             )
             lon.attrs["Description"] = "geodetic longitude of each pixel"
             lon.attrs["Size"] = "Ipixels x Jpixels"
-            lon.attrs["Projection Altitude"] = bright_alt
+            lon.attrs["Projection Altitude"] = self.ha
             lon.attrs["Unit"] = "degrees"
     
             az = f.create_dataset(
@@ -465,14 +481,14 @@ class ImageProcessor:
             el.attrs["Unit"] = "degrees"
     
             pc = f.create_dataset(
-                "Coordinates/PixelCoordinates",
+                "Coordinates/XYGrid",
                 data=np.array([self.new_x_grid, self.new_y_grid]).astype('float32'),
                 compression="gzip",
                 compression_opts=1,
             )
-            pc.attrs["Description"] = "coordinates of each pixel in grid at the airglow altitude"
+            pc.attrs["Description"] = "coordinates of each pixel in grid at the airglow altitude; origin of the grid is directly above the site"
             pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
-            pc.attrs["Projection Altitude"] = bright_alt
+            pc.attrs["Projection Altitude"] = self.ha
             pc.attrs["Unit"] = "km"
     
             # Site Info
@@ -487,12 +503,26 @@ class ImageProcessor:
             code = f.create_dataset("SiteInfo/Instrument", data=self.metadata["label"])
             code.attrs["Description"] = "type of instrument"
     
-            coord = f.create_dataset(
-                "SiteInfo/Coordinates",
+            gcoord = f.create_dataset(
+                "SiteInfo/GeodeticCoordinates",
                 data=[self.metadata["site_lat"], self.metadata["site_lon"]],
             )
-            coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
-            coord.attrs["Unit"] = "degrees"
+            gcoord.attrs["Description"] = "geodetic coordinates of site: [glat, glon]"
+            gcoord.attrs["Unit"] = "degrees"
+    
+            mcoord = f.create_dataset(
+                "SiteInfo/MagneticCoordinates",
+                data=[self.mlat, self.mlon],
+            )
+            mcoord.attrs["Description"] = "Apex magnetic coordinates of site: [mlat, mlon]"
+            mcoord.attrs["Unit"] = "degrees"
+
+            mlt = f.create_dataset(
+                "SiteInfo/MagneticLocalTime", 
+                data=self.mlt,
+            )
+            mlt.attrs["Descritpion"] = "magnetic local time of site"
+            mlt.attrs["Size"] = "Nrecords"
     
             # Data Quality
             f.create_group("DataQuality")
@@ -523,7 +553,7 @@ class ImageProcessor:
             ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=self.elev_cutoff)
             ec.attrs["Description"] = "elevation angle cutoff [deg]"
     
-            ha = f.create_dataset("ProcessingInfo/Altitude", data=bright_alt)
+            ha = f.create_dataset("ProcessingInfo/Altitude", data=self.ha)
             ha.attrs["Description"] = "assumed altitude of brightness layer [km]"
 
             timestamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -539,6 +569,9 @@ class ImageProcessor:
             rf = f.create_dataset("ProcessingInfo/RawFileList", data=self.metadata["filelist"])
             rf.attrs["Description"] = "list of raw files used to generate this dataset"
 
+            team = f.create_dataset("ProcessingInfo/MANGOTeam", data=mango_team)
+            team.attrs["Description"] = "MANGO team to contact for questions about these data"
+
             with io.StringIO() as buffer:
                 self.config.write(buffer)
                 config_str = buffer.getvalue()
@@ -552,6 +585,7 @@ class ImageProcessor:
             f.create_dataset("ProcessingInfo/PlatformInfo/Release", data=platform.release())
             f.create_dataset("ProcessingInfo/PlatformInfo/Version", data=platform.version())
             f.create_dataset("ProcessingInfo/PlatformInfo/HostName", data=platform.node())
+            f.create_dataset("ProcessingInfo/PlatformInfo/OperatorName", data=os.getlogin())
 
 
 # -------------------------------------------------------------------------
