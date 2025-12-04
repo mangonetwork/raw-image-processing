@@ -138,7 +138,7 @@ class ImageProcessor:
 
         
         # Calculate site location in magnetic coordinates
-        datetimes = np.array([dt.datetime.utcfromtimestamp(t) for t in ut])
+        datetimes = np.array([dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in ut])
         A = Apex(datetimes[0])
         self.mlat, self.mlon = A.geo2apex(self.metadata["site_lat"], self.metadata["site_lon"], height=self.ha)
         self.mlt = A.mlon2mlt(self.mlon, datetimes)
@@ -407,9 +407,9 @@ class ImageProcessor:
             )
             images.attrs["Description"] = "pixel values for images"
             images.attrs["Size"] = "Nrecords x Ipixels x Jpixels"
-            images.attrs["station"] = self.metadata["station"]
-            images.attrs["instrument"] = self.metadata["instrument"]
-            images.attrs["remove_background"] = self.remove_background
+            images.attrs["Station"] = self.metadata["station"]
+            images.attrs["Instrument"] = self.metadata["instrument"]
+            images.attrs["Background Removed"] = self.remove_background
     
             mask = f.create_dataset(
                 "Mask", 
@@ -420,8 +420,8 @@ class ImageProcessor:
             mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
             mask.attrs["Size"] = "Ipixels x Jpixels"
     
-            back = f.create_dataset("DarkCurrent", data=self.background)
-            back.attrs["Description"] = "contribution of readout and thermal noise to the image brightness; estimated from the unlit corners of the CCD because MANGO imagers are not equipt to take true dark frames (shutter closed) in the field"
+            back = f.create_dataset("DarkCurrentBackground", data=self.background)
+            back.attrs["Description"] = "contribution of readout and thermal noise to the image brightness (Nelec from Garcia et al., 1997); estimated from the unlit corners of the CCD because MANGO imagers are not equipt to take true dark frames (shutter closed) in the field"
             back.attrs["Size"] = "Nrecords"
  
             # Time
