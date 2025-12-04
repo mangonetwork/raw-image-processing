@@ -17,15 +17,19 @@ import argparse
 import configparser
 import datetime
 import logging
+import multiprocessing
 import os
 import pathlib
 import sys
 
 import h5py
-import hcipy
+#`import hcipy
 import matplotlib.pyplot as plt
 import numpy as np
 import skimage.transform
+
+import matplotlib.animation as animation
+import matplotlib
 
 
 if sys.version_info < (3, 9):
@@ -63,17 +67,29 @@ class QuickLook:
 
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        image_writer = hcipy.plotting.FFMpegWriter(output_file, framerate=10)
+        #image_writer = hcipy.plotting.FFMpegWriter(output_file, framerate=10)
 
+        #fig, ax = plt.subplots()
+        fig, self.ax = plt.subplots(facecolor="black")
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+        frames = []
         for filename in input_list:
             logging.debug(filename)
-            self.plot(filename, image_writer)
+            f = self.plot(filename)
+            frames.append(f)
 
-        image_writer.close()
+        ## Process files with the multiprocessing module (much faster)
+        #with multiprocessing.Pool(processes=4) as pool:
+        #    frames = pool.map(self.plot, input_list, chunksize=1)
+
+        #image_writer.close()
+        ani = animation.ArtistAnimation(fig=fig, artists=frames, interval=100)
+        ani.save(output_file)
+
 
     # pylint: disable=too-many-locals
 
-    def plot(self, filename, image_writer):
+    def plot(self, filename):
         """Process and annotate image"""
 
         wavelength = {"": "Unknown", "Green Line": "557.7 nm", "Red Line": "630.0 nm"}
@@ -94,10 +110,10 @@ class QuickLook:
         label = image.attrs["label"]
         latlon = f"{image.attrs['latitude']:4.1f} N, {image.attrs['longitude']:5.1f} W"
 
-        fig, ax = plt.subplots(facecolor="black")
-        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-
-        ax.imshow(cooked_image, cmap="gray")
+#        fig, ax = plt.subplots(facecolor="black")
+#        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+#
+        frm = self.ax.imshow(cooked_image, cmap="gray")
 
         ny, nx = cooked_image.shape
         dy = 20
@@ -105,26 +121,59 @@ class QuickLook:
         rx = nx - lx
         by = 470
 
-        ax.annotate("N", xy=(nx / 2, dy), ha="center", color="white")
-        ax.annotate("E", xy=(nx - 60, ny / 2), ha="right", color="white")
-        ax.annotate(f"{start_time.date()}", xy=(lx, dy), color="white")
-        ax.annotate(f"{start_time.time()} UTC", xy=(lx, 2 * dy), color="white")
+        artists = [frm]
+        t1 = self.ax.annotate("N", xy=(nx / 2, dy), ha="center", color="white")
+        t2 = self.ax.annotate("E", xy=(nx - 60, ny / 2), ha="right", color="white")
+        t3 = self.ax.annotate(f"{start_time.date()}", xy=(lx, dy), color="white")
+        t4 = self.ax.annotate(f"{start_time.time()} UTC", xy=(lx, 2 * dy), color="white")
+        artists.extend([t1, t2, t3, t4])
 
-        ax.annotate(label, xy=(rx, dy), color="white", ha="right")
-        ax.annotate(wavelength[label], xy=(rx, 2 * dy), color="white", ha="right")
-        ax.annotate(f"{ccd_temp:+5.1f} C", xy=(rx, 3 * dy), color="white", ha="right")
-        ax.annotate(f"{exposure_time} s", xy=(rx, 4 * dy), color="white", ha="right")
+        t1 = self.ax.annotate(label, xy=(rx, dy), color="white", ha="right")
+        t2 = self.ax.annotate(wavelength[label], xy=(rx, 2 * dy), color="white", ha="right")
+        t3 = self.ax.annotate(f"{ccd_temp:+5.1f} C", xy=(rx, 3 * dy), color="white", ha="right")
+        t4 = self.ax.annotate(f"{exposure_time} s", xy=(rx, 4 * dy), color="white", ha="right")
+        artists.extend([t1, t2, t3, t4])
 
-        ax.annotate(f"{code.upper()} - {self.site_state}", xy=(lx, by), color="white")
-        ax.annotate(latlon, xy=(lx, by + dy), color="white")
-        ax.annotate(self.site_name, xy=(lx, by + 2 * dy), color="white")
+        t1 = self.ax.annotate(f"{code.upper()} - {self.site_state}", xy=(lx, by), color="white")
+        t2 = self.ax.annotate(latlon, xy=(lx, by + dy), color="white")
+        t3 = self.ax.annotate(self.site_name, xy=(lx, by + 2 * dy), color="white")
 
-        ax.annotate(
+        t4 = self.ax.annotate(
             "NSF/SRI MANGO DASI", xy=(rx, by + 2 * dy), color="white", ha="right"
         )
+        artists.extend([t1, t2, t3, t4])
 
-        image_writer.add_frame(fig)
-        plt.close()
+#        image_writer.add_frame(fig)
+#        plt.close()
+
+        #print(ax.get_children())
+
+        #txt = ax.findobj(match=matplotlib.text.Text)
+
+
+
+        #img = [] # some array of images
+        #frames = [] # for storing the generated images
+        #fig, ax = plt.subplots()
+        #frm = ax.imshow(cooked_image, cmap="gray")
+
+        return artists
+
+#        for im, t in zip(image, time):
+#            frm = ax.pcolormesh(coords[0], coords[1], im, vmin=0, vmax=20000, cmap='Greys_r')
+#            # print(t)
+#            # tit = ax.set_title(t)
+#            tit = ax.text(0.5,1.05, t, size=plt.rcParams["axes.titlesize"], ha="center", transform=ax.transAxes)
+#            # frm = ax.imshow(im, cmap='Greys_r')
+#            # plt.colorbar(frm)
+#            frames.append([frm, tit])
+#        
+#        print(len(frames))
+#        # ani = animation.ArtistAnimation(fig, frames, interval=50, blit=True,
+#        #                                 repeat_delay=1000)
+#        ani = animation.ArtistAnimation(fig=fig, artists=frames, interval=50, blit=False)
+#        # ani.save('movie.mp4')
+        
 
 
     def equalize(self, image, contrast, num_bins=10000):
