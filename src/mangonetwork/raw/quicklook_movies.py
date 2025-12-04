@@ -17,19 +17,16 @@ import argparse
 import configparser
 import datetime
 import logging
-import multiprocessing
 import os
 import pathlib
 import sys
 
 import h5py
-#`import hcipy
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 import numpy as np
 import skimage.transform
 
-import matplotlib.animation as animation
-import matplotlib
 
 
 if sys.version_info < (3, 9):
@@ -41,19 +38,15 @@ else:
 class QuickLook:
     """Quicklook image processor"""
 
-    def __init__(self, config, input_list, args):
-        self.args = args
-        output_file = pathlib.Path(args.output)
-
+    def __init__(self, config):
         self.load_config(config)
-        self.process_images(input_list, output_file)
 
     def load_config(self, config):
         """Get configuration values"""
 
         self.site_name = config.get("SITE_INFO", "SITE_NAME")
         self.site_state = config.get("SITE_INFO", "SITE_STATE")
-        #self.remove_background = config.getboolean("QUICKLOOK", "REMOVE_BACKGROUND")
+        self.remove_background = config.getboolean("QUICKLOOK", "REMOVE_BACKGROUND", fallback=True)
         self.contrast = config.getfloat("QUICKLOOK", "CONTRAST", fallback=False)
 
         try:
@@ -67,11 +60,9 @@ class QuickLook:
 
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
-        #image_writer = hcipy.plotting.FFMpegWriter(output_file, framerate=10)
-
-        #fig, ax = plt.subplots()
         fig, self.ax = plt.subplots(facecolor="black")
         fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
+
         frames = []
         for filename in input_list:
             logging.debug(filename)
@@ -79,10 +70,10 @@ class QuickLook:
             frames.append(f)
 
         ## Process files with the multiprocessing module (much faster)
+        ## Doesn't work
         #with multiprocessing.Pool(processes=4) as pool:
         #    frames = pool.map(self.plot, input_list, chunksize=1)
 
-        #image_writer.close()
         ani = animation.ArtistAnimation(fig=fig, artists=frames, interval=100)
         ani.save(output_file)
 
@@ -97,10 +88,10 @@ class QuickLook:
         image = h5py.File(filename, "r")["image"]
 
         cooked_image = np.array(image)
-        #if self.remove_background:
-        cooked_image = self.background_removal(cooked_image)
-        cooked_image = self.equalize(cooked_image, self.contrast)
-        cooked_image = self.invert(cooked_image)
+        if self.remove_background:
+            cooked_image = self.background_removal(cooked_image)
+        if self.contrast:
+            cooked_image = self.equalize(cooked_image, self.contrast)
         cooked_image = self.rotate(cooked_image, self.rotation_angle)
 
         start_time = datetime.datetime.utcfromtimestamp(image.attrs["start_time"])
@@ -110,10 +101,10 @@ class QuickLook:
         label = image.attrs["label"]
         latlon = f"{image.attrs['latitude']:4.1f} N, {image.attrs['longitude']:5.1f} W"
 
-#        fig, ax = plt.subplots(facecolor="black")
-#        fig.subplots_adjust(left=0, right=1, top=1, bottom=0, wspace=0, hspace=0)
-#
         frm = self.ax.imshow(cooked_image, cmap="gray")
+
+        # Collect artists to generate annimation
+        artists = [frm]
 
         ny, nx = cooked_image.shape
         dy = 20
@@ -121,7 +112,6 @@ class QuickLook:
         rx = nx - lx
         by = 470
 
-        artists = [frm]
         t1 = self.ax.annotate("N", xy=(nx / 2, dy), ha="center", color="white")
         t2 = self.ax.annotate("E", xy=(nx - 60, ny / 2), ha="right", color="white")
         t3 = self.ax.annotate(f"{start_time.date()}", xy=(lx, dy), color="white")
@@ -143,38 +133,9 @@ class QuickLook:
         )
         artists.extend([t1, t2, t3, t4])
 
-#        image_writer.add_frame(fig)
-#        plt.close()
-
-        #print(ax.get_children())
-
-        #txt = ax.findobj(match=matplotlib.text.Text)
-
-
-
-        #img = [] # some array of images
-        #frames = [] # for storing the generated images
-        #fig, ax = plt.subplots()
-        #frm = ax.imshow(cooked_image, cmap="gray")
-
         return artists
 
-#        for im, t in zip(image, time):
-#            frm = ax.pcolormesh(coords[0], coords[1], im, vmin=0, vmax=20000, cmap='Greys_r')
-#            # print(t)
-#            # tit = ax.set_title(t)
-#            tit = ax.text(0.5,1.05, t, size=plt.rcParams["axes.titlesize"], ha="center", transform=ax.transAxes)
-#            # frm = ax.imshow(im, cmap='Greys_r')
-#            # plt.colorbar(frm)
-#            frames.append([frm, tit])
-#        
-#        print(len(frames))
-#        # ani = animation.ArtistAnimation(fig, frames, interval=50, blit=True,
-#        #                                 repeat_delay=1000)
-#        ani = animation.ArtistAnimation(fig=fig, artists=frames, interval=50, blit=False)
-#        # ani.save('movie.mp4')
-        
-
+       
 
     def equalize(self, image, contrast, num_bins=10000):
         """Histogram Equalization to adjust contrast [1%-99%]"""
@@ -203,6 +164,7 @@ class QuickLook:
         return image_array_1d.reshape(image.shape)
     
     def background_removal(self, image):
+        """Subtract dark current background from image based on corner brightness"""
     
         # Offset from edge of image and size of region for determining the background in each corner of image
         offx = int(0.015*image.shape[1])
@@ -223,21 +185,19 @@ class QuickLook:
         return image
     
     
-    def invert(self, image):
-        """Flip image"""
-    
-        # Makes the under/above inversion more explicit/easier to understand
-    
-        return np.flipud(image)
-    
-    
+   
     def rotate(self, image, angle):
         """Rotate image"""
     
         # MUST flip image before rotating
         # Images are captured from below, but visualized from above in most standard formats
-    
-        return skimage.transform.rotate(image, angle, order=3).astype(float)
+        img_flip =  np.flipud(image)
+
+        # Rotate
+        img_rot = skimage.transform.rotate(img_flip, angle, order=3).astype(float)
+
+        return img_rot
+
     
 
 
@@ -310,10 +270,12 @@ def main():
 
     args = parse_args()
 
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
+    fmt = "[%(asctime)s] %(levelname)s %(message)s"
+
+    if args.verbose > 0:
+        logging.basicConfig(format=fmt, level=logging.DEBUG)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(format=fmt, level=logging.INFO)
 
     inputs = find_inputfiles(args)
 
@@ -325,19 +287,21 @@ def main():
 
     if args.config:
         logging.debug("Alternate configuration file: %s", args.config)
-        if not os.path.exists(args.config):
+        if os.path.exists(args.config):
+            config_file = args.config
+        else:
             logging.error("Config file not found")
             sys.exit(1)
-        with open(args.config, encoding="utf-8") as f:
-            contents = f.read()
     else:
-        contents = find_config(inputs[0])
+        config_file = find_config(inputs[0])
 
     config = configparser.ConfigParser()
-    #config.read_string(contents)
-    config.read(contents)
+    config.read(config_file)
 
-    QuickLook(config, inputs, args)
+    # Generate quicklook movie
+    movie = QuickLook(config)
+    output_file = pathlib.Path(args.output)
+    movie.process_images(inputs, output_file)
 
     sys.exit(0)
 
