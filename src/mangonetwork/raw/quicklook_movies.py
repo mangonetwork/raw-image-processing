@@ -173,11 +173,11 @@ class QuickLook:
         sizey = int(0.05*image.shape[0])
     
         # Calculate means in the four corners
-        m1 = image[offy:offy+sizey, offx:offx+sizex].mean()
-        m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx].mean()
-        m3 = image[offy:offy+sizey, -(offx+sizex):-offx].mean()
-        m4 = image[-(offy+sizey):-offy, offx:offx+sizex].mean()
-        m = np.mean([m1,m2,m3,m4])
+        m1 = image[offy:offy+sizey, offx:offx+sizex]
+        m2 = image[-(offy+sizey):-offy, -(offx+sizex):-offx]
+        m3 = image[offy:offy+sizey, -(offx+sizex):-offx]
+        m4 = image[-(offy+sizey):-offy, offx:offx+sizex]
+        m = np.nanmedian([m1,m2,m3,m4])
         # Subtract mean and set a 0 floor
         image = image - m
         image[image < 0] = 0

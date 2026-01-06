@@ -349,7 +349,7 @@ class ImageProcessor:
 
         masked_image = image[mask]
 
-        m = np.nanmean(masked_image)
+        m = np.nanmedian(masked_image)
 
         return m
 
