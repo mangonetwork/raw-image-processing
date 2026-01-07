@@ -23,19 +23,30 @@ import multiprocessing
 import pathlib
 import os
 import sys
+import platform
+import io
+import datetime as dt
 
 import h5py
 import numpy as np
 from scipy.interpolate import griddata
+from apexpy import Apex
 
-from . import imageops
+
+import matplotlib.pyplot as plt
+# skyfield stuff needed for moon flags
+from skyfield import almanac
+from skyfield.api import N, S, E, W, load, wgs84
 
 if sys.version_info < (3, 9):
     import importlib_resources as resources
+    import importlib_metadata as metadata
 else:
     from importlib import resources
+    from importlib import metadata
 
 RE = 6371.0  # Earth radius (m)
+
 
 # -------------------------------------------------------------------------
 # Image Processor
@@ -43,47 +54,113 @@ RE = 6371.0  # Earth radius (m)
 
 
 class ImageProcessor:
-    """Process a single image"""
+    """Process a set image to produce a nightly file"""
 
     def __init__(self, config):
         self.config = config
 
-        ha = self.config.getfloat("PROCESSING", "ALTITUDE")
-        self.REha = RE + ha
+        self.ha = self.config.getfloat("PROCESSING", "ALTITUDE")
+        self.elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        self.remove_background = self.config.getboolean("PROCESSING", "REMOVE_BACKGROUND")
 
-        # Results
+        self.x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
+        self.y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
+        self.rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
+        self.theta = self.config.getfloat("CALIBRATION_PARAMS", "THETA")
 
-        self.image = None
-        self.metadata = None
-        self.azimuth = None
-        self.elevation = None
-        self.latitude = None
-        self.longitude = None
-        self.image_mask = None
-        self.new_x_grid = None
-        self.new_y_grid = None
-        self.trans_x_grid = None
-        self.trans_y_grid = None
+        self.A = self.config.getfloat("CALIBRATION_PARAMS", "A")
+        self.B = self.config.getfloat("CALIBRATION_PARAMS", "B")
+        self.C = self.config.getfloat("CALIBRATION_PARAMS", "C")
+        self.D = self.config.getfloat("CALIBRATION_PARAMS", "D")
 
-    def run(self, filename):
-        """Run processing algorithm"""
 
-        logging.debug(filename)
+    def setup(self, filename):
+        """Setup the processing algorithm by collecting the time independent metadata and calculating the position arrays that will be constant over the entire night"""
+
+        logging.debug("Setup")
+
+        logging.debug(f"Extracting grid and metadata from: {filename}")
 
         raw_image = h5py.File(filename)["image"]
 
         self.metadata = self.get_metadata(raw_image)
-        self.metadata["filename"] = filename
 
         self.create_transform_grids(raw_image)
-        self.create_position_arrays(raw_image)
+        self.create_position_arrays()
 
-        self.image = self.process(raw_image)
+        self.image_mask = self.create_mask(raw_image)
+
+
+    def process(self, filename):
+        """Process individual images and extract time-dependent data"""
+
+        raw_image = h5py.File(filename)["image"]
+
+        metadata = self.get_time_metadata(raw_image)
+        metadata["filename"] = filename
+
+        background = self.estimate_background(raw_image)
+
+        image = self.regrid_image(raw_image)
+
+        if self.remove_background:
+            image = image - background
+
+        #mage[self.elevation<self.elev_cutoff] = 0.
+
+        return image, metadata, background
+
+
+    def run(self, filelist, numproc=2, seq=False):
+        """Run processing on all input files"""
+
+        logging.debug("Processing Images")
+
+        if seq:
+            # Process files sequentially in a for loop (primarilly for development)
+            results = list()
+            for filename in filelist:
+                results.append(self.process(filename))
+        else:
+            # Process files with the multiprocessing module (much faster)
+            with multiprocessing.Pool(processes=numproc) as pool:
+                results = pool.map(self.process, filelist, chunksize=1)
+
+        self.image_data = np.array([r[0] for r in results])
+        self.background = np.array([r[2] for r in results])
+        metadata = [r[1] for r in results]
+        self.time = np.array([[md["start_time"], md["end_time"]] for md in metadata])
+        self.ccd_temp = np.array([md["ccd_temp"] for md in metadata])
+        self.metadata["filelist"] = [md["filename"] for md in metadata]
+
+        ut = np.mean(self.time, axis=1)
+        self.moon_phase, self.moon_az, self.moon_el = self.moon_position(ut)
+
+        
+        # Calculate site location in magnetic coordinates
+        datetimes = np.array([dt.datetime.fromtimestamp(t, tz=dt.timezone.utc) for t in ut])
+        A = Apex(datetimes[0])
+        self.mlat, self.mlon = A.geo2apex(self.metadata["site_lat"], self.metadata["site_lon"], height=self.ha)
+        self.mlt = A.mlon2mlt(self.mlon, datetimes)
 
         logging.debug("Processing finished")
 
+
     def get_metadata(self, image):
         """Extract metadata"""
+
+        metadata = {}
+        metadata["station"] = image.attrs["station"]
+        metadata["instrument"] = image.attrs["instrument"]
+        metadata["label"] = image.attrs["label"]
+        metadata["site_lat"] = image.attrs["latitude"]
+        metadata["site_lon"] = image.attrs["longitude"]
+
+        return metadata
+
+
+    def get_time_metadata(self, image):
+        """Extract time-dependent metadata"""
 
         metadata = {}
 
@@ -93,12 +170,31 @@ class ImageProcessor:
         metadata["start_time"] = start_time
         metadata["end_time"] = start_time + exposure_time
         metadata["ccd_temp"] = image.attrs["ccd_temp"]
-        metadata["code"] = image.attrs["station"]
-        metadata["label"] = image.attrs["label"]
-        metadata["site_lat"] = image.attrs["latitude"]
-        metadata["site_lon"] = image.attrs["longitude"]
 
         return metadata
+
+
+    def moon_position(self, time):
+        """Calculate the Moon phase and position"""
+
+        site_lat = self.metadata["site_lat"]
+        site_lon = self.metadata["site_lon"]
+
+        eph = load('de421.bsp')
+        ts = load.timescale()
+        t = ts.utc(1970, 1, 1, 0, 0, time)
+
+        # Find phase
+        phase = almanac.moon_phase(eph, t)
+
+        # Find azimuth and elevation for every time
+        earth = eph["earth"]
+        site = earth + wgs84.latlon(site_lat, site_lon)
+        moon = eph["moon"]
+        elev, azmt, dist = site.at(t).observe(moon).apparent().altaz()
+
+        return phase.degrees, azmt.degrees, elev.degrees
+
 
     def create_transform_grids(self, image):
         """Create transformation grids"""
@@ -111,35 +207,24 @@ class ImageProcessor:
         new_i_max = self.config.getint("PROCESSING", "NEWIMAX")
         new_j_max = self.config.getint("PROCESSING", "NEWJMAX")
 
-        x0 = self.config.getfloat("CALIBRATION_PARAMS", "X0")
-        y0 = self.config.getfloat("CALIBRATION_PARAMS", "Y0")
-        rl = self.config.getfloat("CALIBRATION_PARAMS", "RL")
-        theta = self.config.getfloat("CALIBRATION_PARAMS", "THETA")
-
-        A = self.config.getfloat("CALIBRATION_PARAMS", "A")
-        B = self.config.getfloat("CALIBRATION_PARAMS", "B")
-        C = self.config.getfloat("CALIBRATION_PARAMS", "C")
-        D = self.config.getfloat("CALIBRATION_PARAMS", "D")
-
-        elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-
         # Create a grid and find the transformed coordinates of each grid point
 
         x_grid, y_grid = np.meshgrid(np.arange(i_max), np.arange(j_max))
 
         self.trans_x_grid, self.trans_y_grid = self.transform(
-            x_grid, y_grid, x0, y0, rl, theta, A, B, C, D
+            x_grid, y_grid, self.x0, self.y0, self.rl, self.theta, self.A, self.B, self.C, self.D
         )
 
         # Find unwarped distance to elevation cutoff and create new grid
 
-        d = self.unwarp(elev_cutoff * np.pi / 180.0)
+        d = self.unwarp(self.elev_cutoff * np.pi / 180.0)
 
         self.new_x_grid, self.new_y_grid = np.meshgrid(
             np.linspace(-d, d, new_i_max), np.linspace(-d, d, new_j_max)
         )
 
     # pylint: disable=too-many-arguments, too-many-locals
+
 
     def transform(self, x, y, x0, y0, rl, theta, A, B, C, D):
         """Coordinate transform"""
@@ -153,6 +238,7 @@ class ImageProcessor:
 
         r = np.sqrt(x2**2 + y2**2)
         lam = A + B * r + C * r**2 + D * r**3
+
         d = self.unwarp(lam)
 
         x3 = d * x2 / r
@@ -160,33 +246,36 @@ class ImageProcessor:
 
         return x3, y3
 
+
     def unwarp(self, lam):
         """Convert elevation angle to unwarped distance"""
 
-        b = np.arcsin(RE / self.REha * np.sin(lam + np.pi / 2))  # Law of Sines
+        REha = RE + self.ha
+
+        b = np.arcsin(RE / REha * np.sin(lam + np.pi / 2))  # Law of Sines
         psi = np.pi / 2 - lam - b
-        d = self.REha * psi
+        d = REha * psi
 
         return d
 
-    def create_position_arrays(self, image):
+
+    def create_position_arrays(self):
         """Create position arrays"""
 
-        site_lat = image.attrs["latitude"] * np.pi / 180
-        site_lon = image.attrs["longitude"] * np.pi / 180
+        site_lat = self.metadata["site_lat"] * np.pi / 180
+        site_lon = self.metadata["site_lon"] * np.pi / 180
 
-        elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
+        REha = RE + self.ha
 
-        psi = np.sqrt(self.new_x_grid**2 + self.new_y_grid**2) / self.REha
+        psi = np.sqrt(self.new_x_grid**2 + self.new_y_grid**2) / REha
 
         # Law of Cosines
 
-        c = np.sqrt(RE**2 + self.REha**2 - 2 * RE * self.REha * np.cos(psi))
-        b = self.REha - RE * np.cos(psi)
+        c = np.sqrt(RE**2 + REha**2 - 2 * RE * REha * np.cos(psi))
+        b = REha - RE * np.cos(psi)
 
         elv = np.pi / 2.0 - np.arccos(b / c) - psi
         azm = np.arctan2(self.new_x_grid, self.new_y_grid)
-        self.image_mask = elv < elev_cutoff * np.pi / 180.0
 
         # Use Haversine equations to find lat/lon of each point
 
@@ -205,190 +294,298 @@ class ImageProcessor:
         self.latitude = lat * 180.0 / np.pi
         self.longitude = lon * 180.0 / np.pi
 
-    def atmospheric_correction(self, image):
-        """Apply atmospheric correction"""
 
-        # Atmospheric corrections are taken from Kubota et al., 2001
-        # Kubota, M., Fukunishi, H. & Okano, S. Characteristics of medium- and
-        #   large-scale TIDs over Japan derived from OI 630-nm nightglow observation.
-        #   Earth Planet Sp 53, 741–751 (2001). https://doi.org/10.1186/BF03352402
+    def create_mask(self, image):
+        """Create mask array"""
 
-        # calculate zenith angle
+        # Mask low elevation angles
+        elev_mask = self.elevation < self.elev_cutoff
 
-        za = np.pi / 2 - self.elevation * np.pi / 180.0
+        # Get azimuth and Elevation of new grids
+        elev = np.deg2rad(self.elevation)
+        azmt = np.deg2rad(self.azimuth)
 
-        # Kubota et al., 2001; eqn. 6
+        # Calculate r by finding the roots of the cubic lens function
+        Delta0 = self.C**2 - 3 * self.D * self.B
+        Delta1 = 2 * self.C**3 - 9 * self.D * self.C * self.B + 27 * self.D**2 * (self.A-elev)
+        Gamma = ((Delta1 + np.sqrt(Delta1**2 - 4 * Delta0**3)) / 2)**(1./3.)
+        r = -(self.C + Gamma + Delta0/Gamma)/(3 * self.D)
 
-        vanrhijn_factor = np.sqrt(1.0 - np.sin(za) ** 2 * (RE / self.REha) ** 2)
+        # Invert position and rotatation to original ccd coordinates
+        x2 = r*np.sin(azmt)
+        y2 = r*np.cos(azmt)
 
-        # Kubota et al., 2001; eqn. 7,8
+        t = -np.deg2rad(self.theta)
+        x1 = np.cos(t) * x2 - np.sin(t) * y2
+        y1 = np.sin(t) * x2 + np.cos(t) * y2
 
-        a = 0.2
-        F = 1.0 / (np.cos(za) + 0.15 * (93.885 - za * 180.0 / np.pi) ** (-1.253))
-        extinction_factor = 10.0 ** (0.4 * a * F)
+        x = x1 * self.rl + self.x0
+        y = y1 * self.rl + self.y0
 
-        correction = vanrhijn_factor * extinction_factor
+        # Find location of pixels in new image that are outside the original CCD
+        i_max = image.attrs["width"]
+        j_max = image.attrs["height"]
 
-        return image * correction
+        x_mask = np.logical_or( x < 0, x > i_max )
+        y_mask = np.logical_or( y < 0, y > j_max )
+        edge_mask = np.logical_or( x_mask, y_mask )
 
-    def process(self, raw_image):
+        # Mask where elevation angle is low or pixel outside original CCD
+        mask = np.logical_or(elev_mask, edge_mask)
+
+        return mask
+
+
+
+    def estimate_background(self, image):
+        """Estimate background from dark corners of CCD"""
+
+        i_max = image.attrs["width"]
+        j_max = image.attrs["height"]
+
+        x_grid, y_grid = np.meshgrid(np.arange(i_max), np.arange(j_max))
+
+        mask = np.sqrt((x_grid - self.x0)**2 + (y_grid - self.y0)**2) > self.rl
+
+        masked_image = image[mask]
+
+        m = np.nanmedian(masked_image)
+
+        return m
+
+
+
+    def regrid_image(self, raw_image):
         """Processing algorithm"""
 
-        contrast = self.config.getint("PROCESSING", "CONTRAST")
-        elev_cutoff = self.config.getfloat("PROCESSING", "ELEVCUTOFF")
-
         cooked_image = np.array(raw_image)
-        cooked_image = imageops.equalize(cooked_image, contrast)
 
         new_image = griddata(
             (self.trans_x_grid.flatten(), self.trans_y_grid.flatten()),
             cooked_image.flatten(),
             (self.new_x_grid, self.new_y_grid),
             fill_value=0,
+            method='linear'
         )
 
-        # Apply atmopsheric correction
+#        fig = plt.figure()
+#        ax = fig.add_subplot(121)
+#        ax.scatter(self.trans_x_grid, self.trans_y_grid, c=cooked_image, s=0.5)
+#        d = self.unwarp(self.elev_cutoff * np.pi / 180.0)
+#        ax.axvline(-d, color='magenta')
+#        ax.axvline(d, color='magenta')
+#        ax.axhline(-d, color='magenta')
+#        ax.axhline(d, color='magenta')
+#        ax = fig.add_subplot(122)
+#        ax.scatter(self.new_x_grid, self.new_y_grid, c=new_image, s=0.5)
+#        plt.show()
 
-        new_image = self.atmospheric_correction(new_image)
-
-        # Apply mask outside elevation cutoff
-
-        new_image[self.elevation < elev_cutoff] = 0.0
-
-        # Renormalize each image and convert to int
-
-        new_image = (new_image * 255 / np.nanmax(new_image)).astype("uint8")
 
         return new_image
 
 
-# -------------------------------------------------------------------------
-# Application methods
-# -------------------------------------------------------------------------
+    def write_to_hdf5(self, output_file):
+        """Save results to an HDF5 file"""
+    
+        site_name = self.config.get("SITE_INFO", "SITE_NAME")
+        mango_team = self.config.get("SITE_INFO", "TEAM")
+    
+        output_file.parent.mkdir(parents=True, exist_ok=True)
 
-# pylint: disable=too-many-statements, too-many-locals
-
-
-def write_to_hdf5(output_file, config, results):
-    """Save results to an HDF5 file"""
-
-    site_name = config.get("PROCESSING", "SITE_NAME")
-    ha = config.getfloat("PROCESSING", "ALTITUDE")
-
-    start_time = [rec.metadata["start_time"] for rec in results]
-    end_time = [rec.metadata["end_time"] for rec in results]
-    ccd_temp = [rec.metadata["ccd_temp"] for rec in results]
-
-    rec = results[0]
-
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    with h5py.File(output_file, "w") as f:
-        f.create_group("SiteInfo")
-
-        t = f.create_dataset(
-            "UnixTime",
-            data=np.array([start_time, end_time]),
-            compression="gzip",
-            compression_opts=1,
-        )
-        t.attrs["Description"] = "unix time stamp"
-        t.attrs["Unit"] = "seconds"
-
-        lat = f.create_dataset(
-            "Latitude", data=rec.latitude, compression="gzip", compression_opts=1
-        )
-        lat.attrs["Description"] = "geodetic latitude of each pixel"
-        lat.attrs["Size"] = "Ipixels x Jpixels"
-        lat.attrs["Projection Altitude"] = ha
-        lat.attrs["Unit"] = "degrees"
-
-        lon = f.create_dataset(
-            "Longitude", data=rec.longitude, compression="gzip", compression_opts=1
-        )
-        lon.attrs["Description"] = "geodetic longitude of each pixel"
-        lon.attrs["Size"] = "Ipixels x Jpixels"
-        lon.attrs["Projection Altitude"] = ha
-        lon.attrs["Unit"] = "degrees"
-
-        az = f.create_dataset(
-            "Azimuth", data=rec.azimuth, compression="gzip", compression_opts=1
-        )
-        az.attrs["Description"] = "azimuth of each pixel"
-        az.attrs["Size"] = "Ipixels x Jpixels"
-        az.attrs["Unit"] = "degrees"
-
-        el = f.create_dataset(
-            "Elevation", data=rec.elevation, compression="gzip", compression_opts=1
-        )
-        el.attrs["Description"] = "elevation of each pixel"
-        el.attrs["Size"] = "Ipixels x Jpixels"
-        el.attrs["Unit"] = "degrees"
-
-        pc = f.create_dataset(
-            "PixelCoordinates",
-            data=np.array([rec.new_x_grid, rec.new_y_grid]),
-            compression="gzip",
-            compression_opts=1,
-        )
-        pc.attrs[
-            "Description"
-        ] = "coordinates of each pixel in grid at the airglow altitude"
-        pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
-        pc.attrs["Unit"] = "km"
-
-        images = f.create_dataset(
-            "ImageData",
-            data=np.array([rec.image for rec in results]),
-            compression="gzip",
-            compression_opts=1,
-        )
-        images.attrs["Description"] = "pixel values for images"
-        images.attrs["Site Abbreviation"] = rec.metadata["code"]
-        images.attrs["Image label"] = rec.metadata["label"]
-
-        mask = f.create_dataset(
-            "Mask", data=rec.image_mask, compression="gzip", compression_opts=1
-        )
-        mask.attrs["Description"] = "image mask"
-
-        ccd = f.create_dataset("CCDTemperature", data=ccd_temp)
-        ccd.attrs["Description"] = "Temperature of CCD"
-        ccd.attrs["Unit"] = "degrees C"
-
-        name = f.create_dataset("SiteInfo/Name", data=site_name)
-        name.attrs["Description"] = "site name"
-
-        code = f.create_dataset("SiteInfo/Code", data=rec.metadata["code"])
-        code.attrs["Description"] = "one letter site abbreviation/code"
-
-        coord = f.create_dataset(
-            "SiteInfo/Coordinates",
-            data=[rec.metadata["site_lat"], rec.metadata["site_lon"]],
-        )
-        coord.attrs["Description"] = "geodetic coordinates of site; [lat, lon]"
-        coord.attrs["Unit"] = "degrees"
+        # Convert masked image pixels to 0
+        self.image_data[:,self.image_mask] = 0.
 
 
-def worker(filename):
-    """Parallel processing handleer for a single image"""
+        with h5py.File(output_file, "w") as f:
 
-    # pylint: disable=global-variable-undefined
+            # Image Data
+            images = f.create_dataset(
+                "ImageData",
+                data=self.image_data.astype('uint16'),
+                compression="gzip",
+                compression_opts=1,
+            )
+            images.attrs["Description"] = "pixel values for images"
+            images.attrs["Size"] = "Nrecords x Ipixels x Jpixels"
+            images.attrs["Station"] = self.metadata["station"]
+            images.attrs["Instrument"] = self.metadata["instrument"]
+            images.attrs["Background Removed"] = self.remove_background
+    
+            mask = f.create_dataset(
+                "Mask", 
+                data=self.image_mask, 
+                compression="gzip", 
+                compression_opts=1,
+            )
+            mask.attrs["Description"] = "mask of where ImageData array is corners ouside of camera FoV"
+            mask.attrs["Size"] = "Ipixels x Jpixels"
+    
+            back = f.create_dataset("DarkCurrentBackground", data=self.background)
+            back.attrs["Description"] = "contribution of readout and thermal noise to the image brightness (Nelec from Garcia et al., 1997); estimated from the unlit corners of the CCD because MANGO imagers are not equipt to take true dark frames (shutter closed) in the field"
+            back.attrs["Size"] = "Nrecords"
+ 
+            # Time
+            t = f.create_dataset(
+                "UnixTime",
+                data=self.time,
+                compression="gzip",
+                compression_opts=1,
+            )
+            t.attrs["Description"] = "unix time stamp"
+            t.attrs["Size"] = "Nrecords"
+            t.attrs["Unit"] = "seconds"
+            
+            # Coordinates
+            f.create_group("Coordinates")
 
-    processor = ImageProcessor(main_config)
-    processor.run(filename)
+            lat = f.create_dataset(
+                "Coordinates/Latitude", 
+                data=self.latitude.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
+            )
+            lat.attrs["Description"] = "geodetic latitude of each pixel"
+            lat.attrs["Size"] = "Ipixels x Jpixels"
+            lat.attrs["Projection Altitude"] = self.ha
+            lat.attrs["Unit"] = "degrees"
+    
+            lon = f.create_dataset(
+                "Coordinates/Longitude", 
+                data=self.longitude.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
+            )
+            lon.attrs["Description"] = "geodetic longitude of each pixel"
+            lon.attrs["Size"] = "Ipixels x Jpixels"
+            lon.attrs["Projection Altitude"] = self.ha
+            lon.attrs["Unit"] = "degrees"
+    
+            az = f.create_dataset(
+                "Coordinates/Azimuth", 
+                data=self.azimuth.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
+            )
+            az.attrs["Description"] = "azimuth of each pixel"
+            az.attrs["Size"] = "Ipixels x Jpixels"
+            az.attrs["Unit"] = "degrees"
+    
+            el = f.create_dataset(
+                "Coordinates/Elevation", 
+                data=self.elevation.astype('float32'), 
+                compression="gzip", 
+                compression_opts=1,
+            )
+            el.attrs["Description"] = "elevation of each pixel"
+            el.attrs["Size"] = "Ipixels x Jpixels"
+            el.attrs["Unit"] = "degrees"
+    
+            pc = f.create_dataset(
+                "Coordinates/XYGrid",
+                data=np.array([self.new_x_grid, self.new_y_grid]).astype('float32'),
+                compression="gzip",
+                compression_opts=1,
+            )
+            pc.attrs["Description"] = "coordinates of each pixel in grid at the airglow altitude; origin of the grid is directly above the site"
+            pc.attrs["Size"] = "2 (X,Y) x Ipixels x Jpixels"
+            pc.attrs["Projection Altitude"] = self.ha
+            pc.attrs["Unit"] = "km"
+    
+            # Site Info
+            f.create_group("SiteInfo")
 
-    return processor
+            name = f.create_dataset("SiteInfo/Name", data=site_name)
+            name.attrs["Description"] = "site name"
+    
+            code = f.create_dataset("SiteInfo/Code", data=self.metadata["station"])
+            code.attrs["Description"] = "three letter site abbreviation/code"
+    
+            code = f.create_dataset("SiteInfo/Instrument", data=self.metadata["label"])
+            code.attrs["Description"] = "type of instrument"
+    
+            gcoord = f.create_dataset(
+                "SiteInfo/GeodeticCoordinates",
+                data=[self.metadata["site_lat"], self.metadata["site_lon"]],
+            )
+            gcoord.attrs["Description"] = "geodetic coordinates of site: [glat, glon]"
+            gcoord.attrs["Unit"] = "degrees"
+    
+            mcoord = f.create_dataset(
+                "SiteInfo/MagneticCoordinates",
+                data=[self.mlat, self.mlon],
+            )
+            mcoord.attrs["Description"] = "Apex magnetic coordinates of site: [mlat, mlon]"
+            mcoord.attrs["Unit"] = "degrees"
 
+            mlt = f.create_dataset(
+                "SiteInfo/MagneticLocalTime", 
+                data=self.mlt,
+            )
+            mlt.attrs["Descritpion"] = "magnetic local time of site"
+            mlt.attrs["Size"] = "Nrecords"
+    
+            # Data Quality
+            f.create_group("DataQuality")
 
-def worker_init(config):
-    """Initialize parallel processing handler"""
+            ccd = f.create_dataset("DataQuality/CCDTemperature", data=self.ccd_temp)
+            ccd.attrs["Description"] = "Temperature of CCD"
+            ccd.attrs["Size"] = "Nrecords"
+            ccd.attrs["Unit"] = "degrees C"
 
-    # pylint: disable=global-variable-undefined
+            phase = f.create_dataset("DataQuality/MoonPhase", data=self.moon_phase)
+            phase.attrs["Description"] = "Moon Phase in degrees; New = 0, First Quarter = 90, Full = 180, Last Quarter = 270"
+            phase.attrs["Size"] = "Nrecords"
+            phase.attrs["Unit"] = "degrees"
 
-    global main_config
+            az = f.create_dataset("DataQuality/MoonAzimuth", data=self.moon_az)
+            az.attrs["Description"] = "Azimuth of Moon position"
+            az.attrs["Size"] = "Nrecords"
+            az.attrs["Unit"] = "degrees"
 
-    main_config = config
+            el = f.create_dataset("DataQuality/MoonElevation", data=self.moon_el)
+            el.attrs["Description"] = "Elevation of Moon position"
+            el.attrs["Size"] = "Nrecords"
+            el.attrs["Unit"] = "degrees"
+
+            # Processing Info
+            f.create_group("ProcessingInfo")
+
+            ec = f.create_dataset("ProcessingInfo/ElevationCutoff", data=self.elev_cutoff)
+            ec.attrs["Description"] = "elevation angle cutoff [deg]"
+    
+            ha = f.create_dataset("ProcessingInfo/Altitude", data=self.ha)
+            ha.attrs["Description"] = "assumed altitude of brightness layer [km]"
+
+            timestamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ts = f.create_dataset("ProcessingInfo/TimeStamp", data=timestamp)
+            ts.attrs["Description"] = "timestamp when this file was processed"
+
+            ver = f.create_dataset("ProcessingInfo/Version", data=metadata.version("mangonetwork-raw"))
+            ver.attrs["Description"] = "version of processing code"
+
+            pv = f.create_dataset("ProcessingInfo/PythonVersion", data=platform.python_version())
+            pv.attrs["Description"] = "python version"
+
+            rf = f.create_dataset("ProcessingInfo/RawFileList", data=self.metadata["filelist"])
+            rf.attrs["Description"] = "list of raw files used to generate this dataset"
+
+            team = f.create_dataset("ProcessingInfo/MANGOTeam", data=mango_team)
+            team.attrs["Description"] = "MANGO team to contact for questions about these data"
+
+            with io.StringIO() as buffer:
+                self.config.write(buffer)
+                config_str = buffer.getvalue()
+            cfg = f.create_dataset("ProcessingInfo/ConfigFile", data=config_str)
+            cfg.attrs["Description"] = "full text of config file"
+
+            # Platform Info
+            f.create_group("ProcessingInfo/PlatformInfo")
+            f.create_dataset("ProcessingInfo/PlatformInfo/MachineType", data=platform.machine())
+            f.create_dataset("ProcessingInfo/PlatformInfo/System", data=platform.system())
+            f.create_dataset("ProcessingInfo/PlatformInfo/Release", data=platform.release())
+            f.create_dataset("ProcessingInfo/PlatformInfo/Version", data=platform.version())
+            f.create_dataset("ProcessingInfo/PlatformInfo/HostName", data=platform.node())
+            f.create_dataset("ProcessingInfo/PlatformInfo/OperatorName", data=os.getlogin())
 
 
 # -------------------------------------------------------------------------
@@ -413,11 +610,21 @@ def parse_args():
     parser.add_argument(
         "-o",
         "--output",
-        default="mango.hdf5",
-        help="Output filename (default is mango.hdf5)",
+        default="mango-l1.hdf5",
+        help="Output filename (default is mango-l1.hdf5)",
     )
     parser.add_argument(
-        "-n", "--numproc", type=int, default=1, help="Number of parallel processes"
+        "-n", 
+        "--numproc", 
+        type=int, 
+        default=1, 
+        help="Number of parallel processes"
+    )
+    parser.add_argument(
+        "-s", 
+        "--sequential", 
+        action="store_true", 
+        help="Process images sequentially without multiprocessing"
     )
     parser.add_argument(
         "-v",
@@ -453,11 +660,21 @@ def find_config(filename):
         station = h5["image"].attrs["station"]
         instrument = h5["image"].attrs["instrument"]
 
-    name = f"{station}-{instrument}.ini"
+    # Placeholder for default config file location
+    #   This function can be rewritten later
+    config_dir = os.environ['MANGONETWORK_CONFIGS']
 
-    logging.debug("Using package configuration file: %s", name)
+    config_file = os.path.join(config_dir, f"{station}-{instrument}.ini")
 
-    return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    logging.debug("Using package configuration file: %s", config_file)
+
+    #name = f"{station}-{instrument}.ini"
+
+    #logging.debug("Using package configuration file: %s", name)
+
+    #return resources.files("mangonetwork.raw.data").joinpath(name).read_text()
+    return config_file
+
 
 
 def main():
@@ -483,24 +700,23 @@ def main():
 
     if args.config:
         logging.debug("Alternate configuration file: %s", args.config)
-        if not os.path.exists(args.config):
+        if os.path.exists(args.config):
+            config_file = args.config
+        else:
             logging.error("Config file not found")
             sys.exit(1)
-        with open(args.config, encoding="utf-8") as f:
-            contents = f.read()
     else:
-        contents = find_config(inputs[0])
+        config_file = find_config(inputs[0])
 
     config = configparser.ConfigParser()
-    config.read_string(contents)
+    config.read(config_file)
 
-    with multiprocessing.Pool(
-        processes=args.numproc, initializer=worker_init, initargs=(config,)
-    ) as pool:
-        results = pool.map(worker, inputs, chunksize=1)
-
+    # Process images
+    processor = ImageProcessor(config)
+    processor.setup(inputs[0])
+    processor.run(inputs, numproc=args.numproc, seq=args.sequential)
     output_file = pathlib.Path(args.output)
-    write_to_hdf5(output_file, config, results)
+    processor.write_to_hdf5(output_file)
 
     sys.exit(0)
 
