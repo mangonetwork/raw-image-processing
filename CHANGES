@@ -68,3 +68,9 @@
                 par-redline
             Release 1.2.6
 
+2026-02-05  Todd Valentic
+            Add calibrated config files for:
+                lao-redline
+                ovi-greenline
+                pfo-greenline
+            Release 1.2.7
