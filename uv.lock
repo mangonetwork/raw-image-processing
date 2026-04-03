@@ -1057,7 +1057,7 @@ wheels = [
 
 [[package]]
 name = "mangonetwork-raw"
-version = "1.2.8"
+version = "1.2.9"
 source = { editable = "." }
 dependencies = [
     { name = "h5py", version = "3.14.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
