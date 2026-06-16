@@ -602,6 +602,9 @@ def parse_args():
         "-c", "--config", metavar="FILE", help="Alternate configuration file"
     )
     parser.add_argument(
+        "-a", "--addconfig", metavar="FILE", nargs='*', help="Additional configuration files"
+    )
+    parser.add_argument(
         "-f",
         "--filelist",
         metavar="FILE",
@@ -701,15 +704,19 @@ def main():
     if args.config:
         logging.debug("Alternate configuration file: %s", args.config)
         if os.path.exists(args.config):
-            config_file = args.config
+            config_files = [args.config]
         else:
             logging.error("Config file not found")
             sys.exit(1)
     else:
-        config_file = find_config(inputs[0])
+        default_config = find_config(inputs[0])
+        config_files = [default_config]
+
+    if args.addconfig:
+        config_files.extend(args.addconfig)
 
     config = configparser.ConfigParser()
-    config.read(config_file)
+    config.read(config_files)
 
     # Process images
     processor = ImageProcessor(config)
